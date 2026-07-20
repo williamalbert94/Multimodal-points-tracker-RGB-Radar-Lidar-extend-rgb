@@ -106,9 +106,60 @@ $$
 2D image (height-encoded), which is inexpensive to render and lets predicted
 boxes/tracks be overlaid and visually compared against ground truth per frame.
 
-## Caso de estudio
+## Case Study
 
-## Datasets relacionado
+Two distinct failure modes motivate why motion-only, single-modality tracking
+is not sufficient here:
+
+**1. Occlusion inherent to RGB.** A camera projects the 3D scene onto a 2D
+image plane, so two objects that are meters apart in 3D but aligned along the
+same viewing ray fully occlude each other in the image, even though neither
+is physically blocking the other in space. This is a structural limitation of
+the RGB modality, not a corner case — it is exactly the effect AB3DMOT points
+to when explaining why 3D tracking has fewer identity mismatches than 2D
+tracking: *"tracking in 3D can better resolve depth ambiguities and lead to
+fewer mismatches than tracking in 2D"* (Weng et al., 2020). In this project
+RGB is only used for the projection/visualization overlay
+(`plot_rgb_projection_simple`, `utils/visualization_rgb.py`), while the
+primary 3D perception comes from radar/LiDAR precisely to avoid inheriting
+this failure mode.
+
+**2. Range/FOV boundary effect (not occlusion).** A separate, easily confused
+failure mode is a pipeline configured with a maximum operating range (e.g.
+20 m): an instance oscillating near that boundary — briefly at 21 m, back at
+19 m — repeatedly exits and re-enters the valid detection zone. Nothing is
+physically blocking the sensor's view here; the drop is an artifact of a hard
+distance cutoff, not true occlusion. It produces the same symptom (an ID gets
+dropped and a new one is created on re-entry) but the fix is different: a
+softer threshold with hysteresis, rather than an appearance/ReID-based
+re-association. Attributing observed ID switches to the correct one of these
+two causes (true occlusion vs. range-boundary flicker) is necessary before
+concluding a re-identification module is the right solution.
+
+## Related Datasets
+
+This project uses the **View-of-Delft (VoD)** dataset: 8600+ frames of
+synchronized and calibrated 64-layer LiDAR, stereo camera, and 3+1D radar,
+recorded in urban traffic in Delft. VoD's own official benchmarks cover only
+3D object detection and trajectory prediction — there is no official VoD
+tracking benchmark. The tracking-ID annotations used here come from
+**RaTrack** (Pan et al., 2024), an external contribution built on top of VoD
+(see the References section and the repository's main
+[README](../../README.md)).
+
+**Test-set restriction.** RaTrack's own dataset section states this
+explicitly: *"As an official benchmark specific for 3D object detection, the
+annotations of its test split are not publicly available, thereby we
+evaluate our trained models with its validation split, which is unseen
+during our training process."* This matches what we verified directly against
+the tracking labels shipped with this project: the `label_2_tracking` files
+are entirely missing for exactly the clips listed as `test` in
+`dataloader/track_vod_3d.py` (`delft_7, delft_8, delft_16, delft_18,
+delft_20, delft_21, delft_25`), while every clip in `train`/`val` has full,
+dense label coverage. Like RaTrack, this project therefore trains on `train`
+and treats `val` as the effective held-out evaluation set — `test` exists as
+a frame-index split in code but cannot be scored against ground truth because
+no public labels exist for it.
 
 ## Tracking vs. Re-Identification
 
@@ -166,4 +217,3 @@ References:
 - Caesar, H. et al., ["nuScenes: A Multimodal Dataset for Autonomous Driving"](https://arxiv.org/abs/1903.11027), CVPR, 2020.
 - [View-of-Delft dataset & benchmarks — TU Delft Intelligent Vehicles Group](https://intelligent-vehicles.org/datasets/view-of-delft/)
 
-TODO: Write a project introduction here.
