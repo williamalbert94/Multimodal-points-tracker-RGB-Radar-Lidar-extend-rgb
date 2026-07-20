@@ -1,3 +1,49 @@
-Introduction (placeholder)
+Introduction 
+
+# Radar/LiDAR Data Alignment
+
+Radar and LiDAR are mounted at different positions/orientations on the vehicle and
+are sampled while the ego-vehicle is moving, so raw point clouds from the two
+sensors and from consecutive frames do not share a common reference frame. Two
+corrections are applied before fusion (see `dataloader/track_vod_3d.py`):
+
+1. Extrinsic (spatial) alignment: points are converted to homogeneous
+   coordinates and mapped between sensors with the calibrated rigid transform
+       p_radar = T_lidar->radar . p_lidar_hom
+   (`homogeneous_transformation`, `external/vod/frame/transformations.py`).
+
+2. Temporal (ego-motion) alignment: the relative pose between two frames is
+   obtained by chaining each frame's odometry->camera->radar extrinsics and
+   inverting the composition:
+       T_ego = (T_odom->radar(t))^-1 . T_odom->radar(t+1)
+   The earlier point cloud is then re-expressed in the later frame:
+       p_comp = p_t . (T_ego)^-T
+
+Why: without step 1, radar and LiDAR points describing the same object would
+be offset by the fixed sensor-to-sensor extrinsic; without step 2, the same
+object would appear to shift between frames purely due to ego-vehicle motion.
+Both corrections are required for the multimodal fusion and tracking to
+associate points/detections correctly.
+
+# BEV 3D-to-2D Projection
+
+Point clouds are rasterized to a top-down (bird's-eye-view) image for
+inference visualization (see `birds_eye_point_cloud`,
+`external/gnd/module/lidar_projection.py`, used from `utils/visualization_eval.py`).
+For a resolution `res` (meters/pixel) and (x, y, z) points:
+    col = round(-y / res) - floor(side_min / res)
+    row = round( x / res) - floor(fwd_min  / res)
+    pixel = scale_to_255(clip(z, z_min, z_max))
+
+Why: this turns an unordered 3D point cloud into a dense, ground-plane-indexed
+2D image (height-encoded), which is inexpensive to render and lets predicted
+boxes/tracks be overlaid and visually compared against ground truth per frame.
+
+# Caso de estudio
+
+# Datasets relacionado
+
+# Tracking vs Re identificacion
+
 
 TODO: Write a project introduction here.
