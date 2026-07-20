@@ -10,7 +10,7 @@
 [![docker](https://img.shields.io/badge/docker-supported-2496ED.svg)](./docker/Dockerfile)
 [![license](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
 
-📖 [Introduction](./docs/pages/introduction.md) | ⚙️ [Installation](./docs/pages/installation.md) | 🚀 [Get Started](./docs/pages/get_started.txt) | 📘 [Documentation](./docs/pages/documentation.txt)
+📖 [Introduction](./docs/pages/introduction.md) | ⚙️ [Installation](./docs/pages/installation.md) | 🚀 [Get Started](#-getting-started) | 📘 [Documentation](./docs/pages/documentation.txt)
 
 </div>
 
@@ -20,7 +20,7 @@
 - [Dataset](#dataset)
 - [Environment Setup](#environment-setup)
 - [Method](#method)
-- [Training](#training)
+- [🚀 Getting Started](#-getting-started)
   - [Phase 1: Backbone Pre-training](#phase-1-backbone-pre-training)
   - [Phase 2: Tracking Model](#phase-2-tracking-model)
 - [Evaluation](#evaluation)
@@ -112,7 +112,7 @@ The architecture combines:
 - **Global features**: Scene-level context from voxelized representations
 - **Multimodal fusion**: Integration of LiDAR point clouds and camera images
 
-## Training
+## 🚀 Getting Started
 
 ### Phase 1: Backbone Pre-training
 
