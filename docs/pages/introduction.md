@@ -110,6 +110,60 @@ boxes/tracks be overlaid and visually compared against ground truth per frame.
 
 ## Datasets relacionado
 
-## Tracking vs Re identificacion
+## Tracking vs. Re-Identification
+
+Multi-object tracking (MOT) and re-identification (ReID) cover different
+failure modes. **Tracking** maintains an object's identity across
+*consecutive* frames using motion/geometry (e.g. predicted position + Hungarian
+matching). **Re-identification** recovers an object's identity by *appearance*
+after a gap — an occlusion, a missed detection, a temporary exit from the
+field of view — where motion continuity alone breaks down. Phase 2 of this
+project (`config/reid_phase2.yml`) trains a gallery-based ReID head on top of
+the fused radar/LiDAR backbone precisely so identity can survive such gaps,
+not just frame-to-frame motion.
+
+**Existing work on VoD.** The official View-of-Delft benchmarks cover 3D
+object detection and trajectory prediction only — there is no official VoD
+tracking or re-identification benchmark. RaTrack is, to our knowledge, the
+only published multi-object *tracker* evaluated on VoD, and it is purely
+motion-based: it clusters points via motion segmentation and scene-flow
+estimation and builds an affinity matrix for association, with no appearance
+or ReID component. We did not find published work adding a gallery-based
+re-identification stage on VoD.
+
+**Existing work on nuScenes.** nuScenes has an official 3D MOT benchmark, but
+its leading entries (AB3DMOT-style trackers, CenterPoint tracking) are also
+predominantly motion/geometry-based (Kalman filter + IoU or
+Mahalanobis-distance matching on 3D boxes). Appearance-based ReID research
+that does use nuScenes tends to stay in the camera modality (e.g. a
+nuScenes-derived pedestrian ReID dataset built from 2D camera crops) or adds
+ReID at the box/track level inside later fusion trackers (e.g. Stereo3DMOT,
+joint detection+ReID for multi-camera 3D). We did not find nuScenes work doing
+point-level (LiDAR/radar) gallery-based ReID comparable to this project's
+Phase 2.
+
+**Why this gap exists.**
+1. Appearance-based ReID relies on discriminative texture (color, decals,
+   license plates) that camera images provide but point clouds largely do
+   not — radar returns in particular carry almost no visual texture, and even
+   dense LiDAR gives only geometric shape. This is why most vehicle-ReID
+   literature (VeRi-776, VehicleID, etc.) targets camera crops rather than
+   point clouds.
+2. Autonomous-driving tracking benchmarks (KITTI, nuScenes, VoD) are built
+   from short, single-ego-vehicle sequences where objects rarely leave and
+   re-enter the field of view for long — motion continuity is usually enough
+   to keep an identity, so there has been little incentive to add a dedicated
+   appearance-ReID stage, unlike multi-camera surveillance ReID where an
+   identity must be re-acquired across disjoint camera views.
+
+Given this, the gallery-based radar/LiDAR ReID trained in Phase 2 targets a
+combination — point-cloud-level, VoD-specific, tracking *and* ReID — that does
+not appear to have prior published results to directly compare against.
+
+References:
+- Pan, L. et al., ["RaTrack: Moving Object Detection and Tracking with 4D Radar Point Cloud"](https://arxiv.org/abs/2309.09737), 2024.
+- Palffy, A. et al., ["Multi-Class Road User Detection with 3+1D Radar in the View-of-Delft Dataset"](https://www.researchgate.net/publication/358328092_Multi-class_Road_User_Detection_with_31D_Radar_in_the_View-of-Delft_Dataset), IEEE RA-L, 2022.
+- Caesar, H. et al., ["nuScenes: A Multimodal Dataset for Autonomous Driving"](https://arxiv.org/abs/1903.11027), CVPR, 2020.
+- [View-of-Delft dataset & benchmarks — TU Delft Intelligent Vehicles Group](https://intelligent-vehicles.org/datasets/view-of-delft/)
 
 TODO: Write a project introduction here.
