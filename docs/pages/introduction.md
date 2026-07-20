@@ -29,11 +29,29 @@ $$
 \mathbf{p}_{comp} = \mathbf{p}_{t} \cdot \big(T_{ego}\big)^{-T}
 $$
 
-**Why:** without step 1, radar and LiDAR points describing the same object would
-be offset by the fixed sensor-to-sensor extrinsic; without step 2, the same
-object would appear to shift between frames purely due to ego-vehicle motion.
-Both corrections are required for the multimodal fusion and tracking to
-associate points/detections correctly.
+### Importance of Alignment
+
+Both corrections operate on the same ground (BEV) plane used throughout this
+project, and both are necessary for the multimodal fusion and tracking to
+associate points/detections correctly:
+
+- If $T_{lidar \rightarrow radar}$ (Eq. 1) is **not** applied, radar and LiDAR
+  points that hit the same physical object land in different $(x, y)$
+  locations of the plane purely because of the fixed sensor-mounting offset —
+  the fusion backbone would then be matching geometry from two different
+  places, not two views of the same place.
+- If $T_{ego}$ (Eq. 2) is **not** applied, a *static* object appears to move
+  between consecutive frames simply because the ego-vehicle moved — the
+  tracker would confuse this apparent drift with real object motion, biasing
+  motion cues and ID association.
+
+The figure below shows this on synthetic LiDAR/radar point clouds of a single
+vehicle, in the same BEV plane as the equations above: left column is the raw,
+unaligned points; right column is the result of applying Eq. 1 (top row) and
+Eq. 2 (bottom row). Without alignment the two point sets describe what looks
+like two different objects; after alignment they overlap on the same footprint.
+
+![Radar/LiDAR alignment — before vs. after](../figures/radar_lidar_alignment.png)
 
 ## BEV 3D-to-2D Projection
 
