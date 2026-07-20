@@ -1,0 +1,9 @@
+# Optional tooling, install after activating the `mira` conda environment:
+#   pip install -r requirements/extras.txt
+#
+# mlflow        -> experiment tracking (metrics/params/checkpoints across training runs)
+# mkdocs        -> static-site generator to browse this project's docs/ locally or publish them
+# mkdocs-material -> the theme used to render mkdocs sites
+mlflow==2.14.1
+mkdocs==1.6.0
+mkdocs-material==9.5.28

@@ -4,8 +4,8 @@ services:
   tracker_mra:
     container_name: tracker_mra
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: docker/Dockerfile
     stop_signal: SIGINT
     environment:
       - SERVICE_HOST=core
@@ -14,21 +14,22 @@ services:
       - NVIDIA_DRIVER_CAPABILITIES=all
       - USE_NEW_NVSTREAMMUX=yes
       - GST_DEBUG=2
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
       #- NVIDIA_VISIBLE_DEVICES=0
     image: will/tracker_mra
     shm_size: '4gb' #<-- when RUNNING
     user: "root:root"
     volumes:
-      - .:/project
-      - /local/william/tesis/datasets/multimodal/view_of_delft_PUBLIC:/project/view_of_delft_PUBLIC
-      #- /local/william/tesis/repo/Multimodal-Tracker-Mira-/RaTrack/src/run_inference.sh:/project/run_inference.sh
-      #- /local/william/tesis/repo/Multimodal-Tracker-Mira-/RaTrack/src/checkpoints/:/project/checkpoints/
+      - ..:/project
+      - /path/to/your/view_of_delft_PUBLIC:/project/view_of_delft_PUBLIC
       - /etc/passwd:/etc/passwd:ro
       - /etc/group:/etc/group:ro
       - ./root:/home/${USER}
       - /tmp/.X11-unix:/tmp/.X11-unix
     networks:
       - tracker_mra-services
+    depends_on:
+      - mlflow
     deploy:
       resources:
         reservations:
@@ -37,6 +38,41 @@ services:
               capabilities: [gpu]
               device_ids: ['0']
     entrypoint: bash
+
+  # Background service: experiment tracking UI/API, started automatically
+  # with `docker compose up` (no profile). Runs continuously, independent
+  # of tracker_mra's lifecycle.
+  mlflow:
+    container_name: tracker_mlflow
+    build:
+      context: .
+      dockerfile: mlflow.Dockerfile
+    ports:
+      - "5000:5000"
+    volumes:
+      - ../mlruns:/mlruns
+    restart: unless-stopped
+    networks:
+      - tracker_mra-services
+
+  # On-demand microservice: documentation site. Gated behind the "docs"
+  # profile so it does NOT start with a plain `docker compose up`.
+  # Bring it up explicitly with either:
+  #   docker compose --profile docs up mkdocs
+  #   docker compose up mkdocs        (naming it explicitly also works)
+  mkdocs:
+    container_name: tracker_mkdocs
+    image: squidfunk/mkdocs-material:9.5.28
+    command: ["serve", "-a", "0.0.0.0:8000"]
+    working_dir: /docs
+    volumes:
+      - ..:/docs
+    ports:
+      - "8000:8000"
+    profiles:
+      - docs
+    networks:
+      - tracker_mra-services
 
 networks:
   tracker_mra-services:

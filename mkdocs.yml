@@ -1,0 +1,26 @@
+site_name: Multimodal Tracking with Local-Global Feature Fusion
+site_description: RGB + Radar + LiDAR multimodal 3D tracking and re-identification on View-of-Delft
+docs_dir: docs
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.top
+    - content.code.copy
+
+nav:
+  - Home: index.md
+  - Introduction: pages/introduction.md
+  - Installation: pages/installation.md

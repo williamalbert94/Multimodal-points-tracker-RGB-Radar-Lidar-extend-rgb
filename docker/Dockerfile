@@ -23,7 +23,7 @@ RUN wget --quiet https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86
     /bin/bash Miniconda3-latest-Linux-x86_64.sh -b -p $CONDA_DIR && \
     rm Miniconda3-latest-Linux-x86_64.sh
 
-COPY ./environment.yml /project/
+COPY requirements/environment.yml /project/environment.yml
 COPY . /project
 
 RUN conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main && \
@@ -44,7 +44,7 @@ RUN echo "cd /project/" >> ~/.bashrc
 
 
 
-ENTRYPOINT ["conda", "run", "-n", "pytorch_env"]
+ENTRYPOINT ["conda", "run", "-n", "mira"]
 WORKDIR /project/
 
 
