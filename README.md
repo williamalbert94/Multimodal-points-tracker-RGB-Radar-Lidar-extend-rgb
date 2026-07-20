@@ -3,8 +3,6 @@
   <img src="./docs/logo/logo.png" alt="Logo" width="600">
 </div>
 
-A multimodal tracking approach combining local and global features for 3D object tracking and segmentation using point clouds and images.
-
 <div align="center">
 
 [![python](https://img.shields.io/badge/python-3.9-3776AB.svg)](https://www.python.org/)
