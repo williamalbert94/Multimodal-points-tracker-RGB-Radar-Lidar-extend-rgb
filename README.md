@@ -1,5 +1,9 @@
 # Multimodal Tracking with Local-Global Feature Fusion
 
+<div align="center">
+  <img src="./docs/logo/logo.png" alt="Logo" width="600">
+</div>
+
 ![Python](https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white)
 ![C++](https://img.shields.io/badge/C++-00599C?style=for-the-badge&logo=cplusplus&logoColor=white)
 ![PyTorch](https://img.shields.io/badge/PyTorch-EE4C2C?style=for-the-badge&logo=pytorch&logoColor=white)
@@ -98,7 +102,7 @@ When using PointNet with GPU acceleration, the library needs to be loaded and co
 
 Our approach uses a local-global feature fusion backbone for multimodal 3D object tracking:
 
-![Backbone Architecture](./figures/backbone.png)
+![Backbone Architecture](./docs/figures/backbone.png)
 
 The architecture combines:
 - **Local features**: Point-level representations from PointNet++
@@ -128,7 +132,7 @@ To evaluate the trained model on the test set:
 
 **Expected output:**
 
-![Segmentation Results](./figures/repo2.png)
+![Segmentation Results](./docs/figures/repo2.png)
 
 ### Phase 2: Tracking Model
 
@@ -140,7 +144,7 @@ python train.py --config config/reid_phase2.yml
 
 Enable `plot_reid` to visualize results similar to the following:
 
-![Tracking Results](./figures/image.png)
+![Tracking Results](./docs/figures/image.png)
 
 *Left: Ground truth track IDs | Right: Predicted track IDs (vehicle class example)*
 
@@ -158,7 +162,7 @@ Pre-trained weights for both phases are available. Simply point to them in the c
 
 ### Inference Demo
 
-![Inference Visualization](./figures/inferencia.gif)
+![Inference Visualization](./docs/figures/inferencia.gif)
 
 *Real-time tracking and segmentation inference on View of Delft test sequences*
 

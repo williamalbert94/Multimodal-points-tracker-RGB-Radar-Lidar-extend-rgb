@@ -1,0 +1,43 @@
+version: '3.8'
+
+services:
+  tracker_mra:
+    container_name: tracker_mra
+    build:
+      context: .
+      dockerfile: Dockerfile
+    stop_signal: SIGINT
+    environment:
+      - SERVICE_HOST=core
+      - SERVICE_PORT=50051
+      - DISPLAY=${DISPLAY}
+      - NVIDIA_DRIVER_CAPABILITIES=all
+      - USE_NEW_NVSTREAMMUX=yes
+      - GST_DEBUG=2
+      #- NVIDIA_VISIBLE_DEVICES=0
+    image: will/tracker_mra
+    shm_size: '4gb' #<-- when RUNNING
+    user: "root:root"
+    volumes:
+      - .:/project
+      - /local/william/tesis/datasets/multimodal/view_of_delft_PUBLIC:/project/view_of_delft_PUBLIC
+      #- /local/william/tesis/repo/Multimodal-Tracker-Mira-/RaTrack/src/run_inference.sh:/project/run_inference.sh
+      #- /local/william/tesis/repo/Multimodal-Tracker-Mira-/RaTrack/src/checkpoints/:/project/checkpoints/
+      - /etc/passwd:/etc/passwd:ro
+      - /etc/group:/etc/group:ro
+      - ./root:/home/${USER}
+      - /tmp/.X11-unix:/tmp/.X11-unix
+    networks:
+      - tracker_mra-services
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              capabilities: [gpu]
+              device_ids: ['0']
+    entrypoint: bash
+
+networks:
+  tracker_mra-services:
+
