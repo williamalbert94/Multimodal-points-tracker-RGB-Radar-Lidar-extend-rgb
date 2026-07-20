@@ -10,7 +10,7 @@
 [![docker](https://img.shields.io/badge/docker-supported-2496ED.svg)](./docker/Dockerfile)
 [![license](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
 
-📖 [Introduction](./docs/pages/introduction.txt) | ⚙️ [Installation](./docs/pages/installation.txt) | 🚀 [Get Started](./docs/pages/get_started.txt) | 📘 [Documentation](./docs/pages/documentation.txt)
+📖 [Introduction](./docs/pages/introduction.md) | ⚙️ [Installation](./docs/pages/installation.txt) | 🚀 [Get Started](./docs/pages/get_started.txt) | 📘 [Documentation](./docs/pages/documentation.txt)
 
 </div>
 
