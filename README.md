@@ -1,4 +1,3 @@
-# Multimodal Tracking with Local-Global Feature Fusion
 
 <div align="center">
   <img src="./docs/logo/logo.png" alt="Logo" width="600">
