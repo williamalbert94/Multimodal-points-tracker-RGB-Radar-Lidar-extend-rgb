@@ -3,12 +3,18 @@
   <img src="./docs/logo/logo.png" alt="Logo" width="600">
 </div>
 
-![Python](https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white)
-![C++](https://img.shields.io/badge/C++-00599C?style=for-the-badge&logo=cplusplus&logoColor=white)
-![PyTorch](https://img.shields.io/badge/PyTorch-EE4C2C?style=for-the-badge&logo=pytorch&logoColor=white)
-![Docker](https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white)
-
 A multimodal tracking approach combining local and global features for 3D object tracking and segmentation using point clouds and images.
+
+<div align="center">
+
+[![python](https://img.shields.io/badge/python-3.9-3776AB.svg)](https://www.python.org/)
+[![pytorch](https://img.shields.io/badge/pytorch-2.2.0-EE4C2C.svg)](https://pytorch.org/)
+[![docker](https://img.shields.io/badge/docker-supported-2496ED.svg)](./docker/Dockerfile)
+[![license](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
+
+[Introduction](#) | [Installation](#) | [Get Started](#) | [📘Documentation](#)
+
+</div>
 
 ## Table of Contents
 
