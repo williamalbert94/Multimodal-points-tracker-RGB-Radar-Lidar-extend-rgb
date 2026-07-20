@@ -176,9 +176,17 @@ Performance comparison on the View of Delft dataset:
 | Method | sAMOTA ↑ | AMOTA ↑ | MOTA ↑ | IDSW ↓ | mIoU ↑ |
 |--------|----------|---------|--------|--------|--------|
 | AB3DMOT-PP | 60.71 | 21.51 | 49.38 | -- | -- |
-| RaTrack | 74.16 | 31.50 | 67.27 | -- | 57.0 |
+| RaTrack | 74.16 | 31.50 | 67.27 | 406 † | 57.0 |
 | **LocalGlobalFusion (Ours)** | **76.5** | **34.0** | **69.5** | **84** | **63.0** |
 | voxelPointFusion | 70.5 | 30.5 | 64.5 | 150 | 53.3 |
+
+† RaTrack does not publish an IDSW figure. This value was recovered by
+re-evaluating RaTrack's released per-frame predictions against the VoD
+validation split (moving objects only, point-based IoU 0.25), following its
+paper's protocol — see [`examples/ratrack/`](./examples/ratrack/) for the
+reproducible evaluator. Over 81 established GT tracks, 70 (86%) suffer at least
+one identity switch, which is the ID-instability that motivates the
+re-identification stage in Phase 2.
 
 ## References
 
