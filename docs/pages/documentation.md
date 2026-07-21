@@ -1,10 +1,102 @@
-# Documentation — how the tracking metrics are computed
+# Documentation
 
-This page documents exactly how every reported tracking number is obtained from
-RaTrack's released per-frame inference files, including the equations. It exists
-because RaTrack's own evaluator was never published (withheld for licensing
-reasons), so every figure here had to be reconstructed and independently
-validated.
+- [Dataloader sanity check](#dataloader-sanity-check)
+- [Camera projection check](#camera-projection-check)
+- [How the tracking metrics are computed](#how-the-tracking-metrics-are-computed)
+
+## Dataloader sanity check
+
+`examples/dataloader/check_dataloader.py` renders one figure per frame across the
+train and validation splits, so the geometry the network will consume can be
+inspected before training. Each figure has four panels:
+
+| Panel | What it verifies |
+|---|---|
+| **Radar / LiDAR alignment (BEV)** | the extrinsic transform. Both modalities must land on the same structures; a constant offset means the calibration is wrong |
+| **Ego-motion compensation (BEV)** | `T_ego`. Static structure must collapse onto itself between the raw and compensated sweep; residual drift means the pose chain is wrong |
+| **LiDAR BEV height map** | the top-down rasterisation used downstream |
+| **Camera** | RGB reference for the same frame |
+
+Ground-truth moving boxes are overlaid on the BEV panels.
+
+![Dataloader sanity check](../figures/dataloader_check.png)
+
+*`delft_1`, frame 00002. Radar (red) follows the same street-canyon walls as the
+LiDAR (blue) at ±15–20 m lateral, confirming the extrinsic transform; the truck
+visible in the camera appears as a box in the BEV height map.*
+
+### Running it
+
+Inside the container (see [Installation](installation.md)):
+
+```bash
+# both splits, every frame (~4600 figures)
+python examples/dataloader/check_dataloader.py --split both
+
+# quick look: 20 validation frames
+python examples/dataloader/check_dataloader.py --split val --limit 20
+
+# subsample a long split
+python examples/dataloader/check_dataloader.py --split train --stride 10
+```
+
+Or from the host:
+
+```bash
+docker run --rm --gpus all \
+  -v "$PWD":/project \
+  -v /path/to/view_of_delft_PUBLIC:/project/view_of_delft_PUBLIC:ro \
+  -w /project will/tracker_multimodal_mira \
+  conda run -n mira python examples/dataloader/check_dataloader.py --split both
+```
+
+Figures are written to `examples/dataloader/check/<split>/` and that directory is
+git-ignored — one PNG per frame across both splits is hundreds of megabytes, so
+regenerate locally rather than committing them. Override the dataset location
+with `--root` or the `VOD_ROOT` environment variable.
+
+## Camera projection check
+
+`examples/dataloader/check_projection.py` verifies the other half of the
+calibration: the **camera projection chain**. Where the BEV panels above confirm
+the radar↔LiDAR extrinsic, this confirms that a 3D box travels correctly through
+box (camera frame) → LiDAR frame → camera frame → image plane.
+
+| Panel | What it verifies |
+|---|---|
+| **3D boxes on RGB** | the full projection chain and the rotation convention. Moving objects are green with their track id, static ones grey; a wrong calibration makes the wireframes drift off the objects, which is obvious at a glance |
+| **Radar points on RGB** | the radar→camera extrinsic, coloured by range — a cross-check the BEV panels cannot provide |
+
+![Camera projection check](../figures/projection_check.png)
+
+*`delft_1`, frame 00000. The truck's wireframe (#1519) wraps the vehicle and the
+pedestrian boxes sit on the people; radar returns are red (near) on the truck and
+blue (far) down the street.*
+
+The projection mirrors the VoD devkit's `get_2d_label_corners`, extended to carry
+the track id and moving flag through — the devkit sorts boxes by range and drops
+both fields, which is why the math is reimplemented rather than called directly.
+
+> **[3D → 2D reprojection](reprojection.md)** covers the method and its equations
+> in full, plus a failure mode worth knowing about: objects passing within a
+> couple of metres of the camera have corners at near-zero depth, and the
+> perspective division throws them tens of thousands of pixels off-canvas.
+
+```bash
+python examples/dataloader/check_projection.py --split both
+python examples/dataloader/check_projection.py --split val --limit 20
+python examples/dataloader/check_projection.py --split train --stride 10
+```
+
+Output goes to `examples/dataloader/check_projection/<split>/`, also git-ignored.
+
+## How the tracking metrics are computed
+
+This section documents exactly how every reported tracking number is obtained
+from RaTrack's released per-frame inference files, including the equations. It
+exists because RaTrack's own evaluator was never published (withheld for
+licensing reasons), so every figure here had to be reconstructed and
+independently validated.
 
 - [1. What the inference `.txt` files contain](#1-what-the-inference-txt-files-contain)
 - [2. Ground truth and the validity rule](#2-ground-truth-and-the-validity-rule)

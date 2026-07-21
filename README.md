@@ -175,12 +175,11 @@ Performance comparison on the View of Delft dataset:
 
 | Method | sAMOTA ↑ | AMOTA ↑ | MOTA ↑ | IDSW ↓ | MT ↑ | ML ↓ | mIoU ↑ |
 |--------|----------|---------|--------|--------|------|------|--------|
-| CenterPoint | 43.21 | 14.40 | 38.44 | 149 ‡ | 19.12 | 38.24 | evals only tracker |
-| CenterPoint-PP | 44.54 | 16.33 | 43.96 | 40 ‡ | 19.12 | 54.41 | evals only tracker |
-| AB3DMOT | 51.23 | 15.00 | 46.72 | 28 ‡ | 20.59 | 39.71 | evals only tracker |
-| AB3DMOT-PP *(PointPillars det.)* | 60.71 | 21.51 | 49.38 | 20 ‡ | 26.47 | 33.82 | n/a |
-| **AB3DMOT-RT** *(RaTrack det., ours)* | — | — | — | **313** § | — | — | 57.00 § |
-| RaTrack | 74.16 | 31.50 | 67.27 | 404 † | 42.65 | 14.71 | 57.00 |
+| CenterPoint | 43.21 | 14.40 | 38.44 | -- | 19.12 | 38.24 | evals only tracker |
+| CenterPoint-PP | 44.54 | 16.33 | 43.96 | -- | 19.12 | 54.41 | evals only tracker |
+| AB3DMOT | 51.23 | 15.00 | 46.72 | -- | 20.59 | 39.71 | evals only tracker |
+| AB3DMOT-PP *(PointPillars det.)* | 60.71 | 21.51 | 49.38 | 313 ‡ | 26.47 | 33.82 | n/a |
+| RaTrack | 74.16 | 31.50 | 67.27 | 404 | 42.65 | 14.71 | 57.00 |
 | **LocalGlobalFusion (Ours)** | **76.50** | **34.03** | **69.45** | **119** | — | — | **65.00** |
 | VoxelPointFusion | 70.34 | 30.70 | 64.00 | 320 | — | — | 53.30 |
 
