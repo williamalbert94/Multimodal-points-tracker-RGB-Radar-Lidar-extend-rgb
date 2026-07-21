@@ -24,3 +24,4 @@ nav:
   - Home: index.md
   - Introduction: pages/introduction.md
   - Installation: pages/installation.md
+  - Documentation: pages/documentation.md

@@ -88,13 +88,112 @@ its `filter_moving_boxes_det` does) and point-based IoU 0.25.
 
 | Metric | Recovered | RaTrack reference | Comparable? |
 |---|---|---|---|
-| **IDS** (id-switches) | **406** over 81 established GT tracks; **70/81 (86%) switch ≥ once** | never published | yes — fills a gap in their table |
+| **IDS** (id-switches) | **133** over 53 established GT tracks | never published (implied **114**) | yes — validated, see below |
 | **mIoU** (tracked-cluster stage) | 63.82 (acc 96.36, sens 62.25) | 57.0 (seg-**head** stage) | **no** — different pipeline stage |
 
-**IDS = 406** is the headline: it is direct evidence for the thesis premise that
-motion-only tracking (RaTrack has no ReID) is severely ID-unstable. 86% of
-established tracks lose their identity at least once; individual objects cycle
-through long id chains, e.g. `408→410→412→413→414→415`.
+### IDS is cross-validated against RaTrack's own published numbers
+
+AB3DMOT's metric definitions give an identity that lets us derive RaTrack's
+unpublished IDS from its published table:
+
+```
+MOTA = 1 − (FN + FP + IDS)/n_gt      MODA = 1 − (FN + FP)/n_gt
+  =>  MODA − MOTA = IDS / n_gt  =  77.83 − 67.27  =  10.56 %
+```
+
+Measuring n_gt on the validation split and comparing with what we recover:
+
+| GT validity rule | n_gt | IDS implied by their table | IDS we measure | Δ |
+|---|---:|---:|---:|---:|
+| ≥ 1 radar point | 4240 | 448 | 404 | −10% |
+| **≥ 2 radar points** (`min_obj_points: 2`, their default) | **3116** | **329** | **367** | **+12%** |
+| ≥ 3 radar points | 2179 | 230 | 289 | +26% |
+| ≥ 5 radar points | 1075 | 114 | 133 | +17% |
+
+Two fully independent routes agree across every threshold, which validates the
+evaluator. **Report 367**: RaTrack's shipped configs (`src/configs.yaml` and
+`src/configs_eval.yaml`) both set `min_obj_points: 2`, so that row is the
+like-for-like figure. (The paper's sensitivity analysis separately explores a
+5-point threshold, but 2 is the default the released model was evaluated with.)
+
+### Which counting convention? (it changes the answer 8×)
+
+RaTrack evaluates with its **own modified** AB3DMOT evaluator, adapted to VoD
+with point-based IoU — and that code was never released, so its exact ID-switch
+condition is unknown. Two plausible conventions:
+
+* **A** — an id change counts even if the object was unmatched for some frames
+  (recovery with a *different* id is a switch).
+* **B** — AB3DMOT/KITTI's own rule, which additionally requires `g[f-1] != -1`,
+  i.e. the object must have been matched in the immediately preceding frame;
+  post-gap id changes are booked as *fragmentations*, not switches.
+
+| GT validity | Conv. A | Conv. B | Implied by their MOTA/MODA |
+|---|---:|---:|---:|
+| ≥ 1 point | 404 | 48 | 448 |
+| **≥ 2 points** | **367** | 44 | **329** |
+| ≥ 3 points | 289 | 32 | 230 |
+| ≥ 5 points | 133 | 9 | 114 |
+
+Only **Convention A** reproduces the figure implied by RaTrack's published
+MOTA/MODA gap; Convention B lands ~87% low at every threshold. Since the implied
+value is derived from *their own* reported numbers, this is strong evidence that
+their evaluator counts post-gap id changes. This example therefore uses
+Convention A (see `idsw_eval.py`).
+
+### IDSW alone is a trap — always report MT/ML with it
+
+Applying the same identity to every row of RaTrack's Table I (n_gt = 3116):
+
+| Method | MODA − MOTA | IDS implied | MT ↑ | ML ↓ |
+|---|---:|---:|---:|---:|
+| CenterPoint | 3.52% | 110 | 19.12 | 38.24 |
+| CenterPoint-PP | 0.95% | 30 | 19.12 | 54.41 |
+| AB3DMOT | 0.66% | 21 | 20.59 | 39.71 |
+| AB3DMOT-PP | 0.48% | 15 | 26.47 | 33.82 |
+| **RaTrack** | 10.56% | **329** | **42.65** | **14.71** |
+
+RaTrack has by far the *most* ID switches and is nonetheless the best tracker in
+the paper. It is tempting to dismiss this as "AB3DMOT-PP simply tracks less", but
+that does not survive checking: normalising by objects actually tracked
+(recall ≥ MODA, so ~2425 instances for RaTrack vs ~1554 for AB3DMOT-PP) still
+leaves **1.0 vs 13.6 switches per 100 tracked instances** — a 14× gap.
+
+It is a real architectural trade-off:
+
+* **AB3DMOT** propagates *parameterised 3D boxes* through a Kalman filter. The
+  track state is stable, so identity is stable — but it depends on PointPillars
+  regressing usable boxes, which sparse radar defeats (ML 33.8%).
+* **RaTrack** re-runs DBSCAN clustering *from scratch every frame*, precisely to
+  avoid box regression on sparse radar. That buys far better detection (MODA
+  77.83 vs 49.86) at the cost of cluster identity that splits, merges and churns.
+
+So RaTrack solved detection on sparse radar and left **identity** unsolved, which
+is exactly what a re-identification stage targets. **Never quote IDSW without
+MT/ML beside it**, and never compare IDSW across methods at different recall
+without normalising.
+
+The instability is still real and motivates the ReID stage: individual objects
+cycle through long id chains such as `408→410→412→413→414→415`.
+
+**Averaging convention.** mIoU is a **frame-weighted** mean: every frame's mIoU
+is pooled and averaged over all 1289 frames, which reproduces RaTrack's own
+convention (`seg_met[key] / num_examples`). Do **not** average the four per-clip
+values unweighted — clips range from 34 to 542 frames, so that gives a different
+(wrong) 60.94. Per-clip figures, for reference:
+
+| Clip | Frames | Frames w/ moving GT | mIoU (all) | mIoU (non-empty) |
+|---|---:|---:|---:|---:|
+| delft_1 | 542 | 483 | 66.06 | 68.09 |
+| delft_10 | 34 | 34 | 54.20 | 54.20 |
+| delft_14 | 431 | 403 | 65.71 | 66.83 |
+| delft_22 | 282 | 208 | 57.80 | 60.61 |
+| **Total** | **1289** | **1128** | **63.82** | **65.84** |
+
+161 frames contain no moving GT at all; by RaTrack's formula each contributes
+~0.5, so excluding them raises the mean to 65.84. Quote **63.82** when comparing
+against RaTrack (same convention); 65.84 is performance conditioned on there
+being something to segment.
 
 **On the mIoU discrepancy (63.82 vs 57.0) — read before quoting.** These are not
 the same quantity. RaTrack's published 57.0 scores its *segmentation head*

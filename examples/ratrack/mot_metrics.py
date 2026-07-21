@@ -84,10 +84,10 @@ def compute_clearmot(frames: List[FrameMatch], conf_thr: float, iou_thr: float):
             else:
                 fn += 1
                 traj[gid].append(-1)
-        # GT ids not present this frame get a gap marker so FRAG counts correctly
-        for gid in traj:
-            if gid not in seen_gt:
-                traj[gid].append(-1)
+        # NOTE: only frames where the GT object actually EXISTS are appended.
+        # Padding absent objects with -1 would make MT/ML divide by the whole
+        # sequence length (1289 frames here) instead of the object's lifespan,
+        # pushing essentially every trajectory into "mostly lost".
         fp += len(pred_ids_k) - len(matched_pred)
 
     # IDS + FRAG from trajectories
