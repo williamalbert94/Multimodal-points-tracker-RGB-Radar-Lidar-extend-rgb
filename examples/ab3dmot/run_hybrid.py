@@ -31,7 +31,7 @@ sys.path.insert(0, os.path.join(_HERE, "..", "ratrack"))
 from ratrack_io import parse_prediction_frame, parse_gt_frame_moving   # noqa: E402
 from idsw_eval import idsw_report                                      # noqa: E402
 from point_iou import (load_radar_cloud, frame_transforms, _gt_obb,    # noqa: E402
-                       _cluster_indices)
+                       _cluster_indices, merge_rider_objects)
 from run_ab3dmot import make_tracker                                   # noqa: E402
 
 VOD_ROOT = os.environ.get("VOD_ROOT", "/project/view_of_delft_PUBLIC")
@@ -79,13 +79,19 @@ def run_clip(clip, max_age=2):
         cloud = o3d.geometry.PointCloud()
         cloud.points = o3d.utility.Vector3dVector(radar)
         t_rc, t_rl = frame_transforms(fid)
-        gt_keep, gt_sets = [], []
+        raw_objs, raw_sets = [], []
         for g in gts:
             idx = set(_gt_obb(g, t_rc, t_rl)
                       .get_point_indices_within_bounding_box(cloud.points))
-            if len(idx) >= MIN_OBJ_POINTS:
-                gt_keep.append(g)
-                gt_sets.append(idx)
+            if idx:
+                raw_objs.append(g)
+                raw_sets.append(idx)
+        # RaTrack merges each `rider` into its nearest object before scoring;
+        # without this a cyclist counts as two GT objects while DBSCAN yields
+        # one cluster, forcing an unavoidable FN.
+        raw_objs, raw_sets = merge_rider_objects(raw_objs, raw_sets, radar)
+        gt_keep = [g for g, s in zip(raw_objs, raw_sets) if len(s) >= MIN_OBJ_POINTS]
+        gt_sets = [s for s in raw_sets if len(s) >= MIN_OBJ_POINTS]
         cl_sets = [_cluster_indices(c.points, radar) for c in clusters]
         iou = np.zeros((len(gt_keep), len(clusters)))
         for gi, A in enumerate(gt_sets):

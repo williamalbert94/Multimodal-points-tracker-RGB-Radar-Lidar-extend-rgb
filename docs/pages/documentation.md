@@ -71,6 +71,22 @@ $$
 G_j^{(t)} = \{\, i : p_i \in \mathrm{Box}(\mathbf{c}_{radar}, R, (l,w,h)) \,\}
 $$
 
+**Rider merging.** VoD annotates a cyclist as **two** objects — the `rider`
+(person) and the `bicycle`. RaTrack's `filter_object_points` merges them: every
+`rider` is absorbed into its nearest neighbour by centroid distance,
+
+$$
+j^{\star} = \arg\min_{j \neq i} \big\| \mathrm{centroid}(G_i) - \mathrm{centroid}(G_j) \big\|,
+\qquad
+G_{j^{\star}} \leftarrow G_{j^{\star}} \cup G_i
+$$
+
+This matters for scoring, not only training: DBSCAN produces a *single* cluster
+for the whole cyclist, so matching it against two separate GT objects forces one
+to be a TP and the other an unavoidable FN. Replicating the merge raises
+matched-GT recall from 54% to 68% (1019 riders merged over the split) and lowers
+IDSW from 404 to 389.
+
 **Validity rule.** RaTrack's shipped configs (`src/configs.yaml`,
 `src/configs_eval.yaml`) set `min_obj_points: 2`, so objects with fewer than
 $\theta_{pts}$ radar points are discarded from *both* sides:
@@ -281,14 +297,27 @@ boxes — there detections never drop out, so coasting never helps.
 agreeing within 12% across four validity thresholds. Also AMOTP (60.26 measured
 vs 60.17 published).
 
-**Not reproduced.** Absolute MOTA / MODA / MT / ML / sAMOTA / AMOTA. Our GT point
-sets are smaller than RaTrack's: only ~69% of GT instances have any cluster at
-$\mathrm{IoU} \ge 0.25$, capping recall below their MODA of 77.83. The likely
-cause is box inflation on the GT side — `get_bbx_param` carries the comment
-*"enlarge the box field to include points with measure errors"* but the released
-code applies no inflation. Until that is resolved, only relative deltas measured
-with a single evaluator on identical detections should be quoted from this
-reconstruction.
+**Not reproduced.** Absolute MOTA / MODA / MT / ML / sAMOTA / AMOTA. Best
+achieved MODA is ~25 against their published 77.83. The following hypotheses were
+tested against RaTrack's source and eliminated:
+
+| Hypothesis | Effect on MODA | Verdict |
+|---|---|---|
+| Alternative IoU (min / recall / precision normalisation) | ≤ 24.85 | rejected |
+| GT box inflation ×1.25 … ×3.0 | ≤ 21.5 (adds FN faster than TP) | rejected |
+| Validity threshold $\theta_{pts} \in \{2,3,5,10\}$ | degrades | rejected |
+| Frame offset ±1 | offset 0 optimal | rejected — alignment correct |
+| Point-cloud subsampling (`num_points: 256`) | dataloader takes `radar_data[:, :3]` whole | rejected — no subsampling |
+| Ignoring predictions that land on *static* GT | 5.14 → 16.27 | partial |
+| **Rider/bicycle merging** | recall 54% → 68% | **confirmed, adopted** |
+| Confidence threshold at best MOTA | → 25.07 combined | partial |
+
+The residual gap is dominated by false positives: ~730 predicted clusters match
+no moving GT even at the best confidence threshold, while their MODA implies
+$\mathrm{FN}+\mathrm{FP} \approx 547$ in total. Since their evaluator was never
+released, the remaining difference could not be attributed. **Quote only relative
+deltas measured with a single evaluator on identical detections**, plus IDSW,
+which is separately validated by §8.
 
 ## Reproducing
 
