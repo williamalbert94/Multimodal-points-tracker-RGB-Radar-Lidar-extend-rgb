@@ -6,7 +6,8 @@ so the geometry the network consumes can be inspected before training.
 | Script | Verifies | Output |
 |---|---|---|
 | `check_dataloader.py` | BEV geometry — radar↔LiDAR extrinsic and ego-motion compensation | `check/` |
-| `check_projection.py` | camera projection chain — 3D boxes and radar projected into the image | `check_projection/` |
+| `check_projection.py` | camera projection chain — raw, nothing hidden | `check_projection/` |
+| `check_projection_adjusted.py` | same, with near-plane clipping so close objects stay on-canvas | `check_projection_adjusted/` |
 
 ---
 
@@ -85,3 +86,31 @@ python examples/dataloader/check_projection.py --split val --limit 20
 
 Unlike `check_dataloader.py`, this one reads frames directly and does not need
 the `t±1` neighbours, so it covers every annotated frame in both splits.
+
+---
+
+## `check_projection_adjusted.py` — projection constrained to the canvas
+
+Same panels, with the reprojection blow-up removed. Objects passing within a
+couple of metres of the camera have corners at near-zero depth; perspective
+division throws them tens of thousands of pixels off-canvas and matplotlib then
+squeezes the photo into a thumbnail.
+
+![Adjusted projection](../../docs/figures/reproj_01027_fixed.png)
+
+Two corrections:
+
+1. **Near-plane clipping in 3D, before the division** — each edge is intersected
+   with `Z_c = NEAR` (default 0.5 m) and only the visible part drawn. Clipping
+   before projecting is what makes it correct; clamping pixels afterwards would
+   bend edges to the wrong place.
+2. **Canvas clamp** — axes pinned to the image extent with `clip_on=True`.
+
+```bash
+python examples/dataloader/check_projection_adjusted.py --split both
+python examples/dataloader/check_projection_adjusted.py --split train --near 1.0
+```
+
+Both projection scripts are kept: the raw one hides nothing and is the better
+tool for spotting calibration problems, this one is the readable version. Full
+derivation in [docs/pages/reprojection.md](../../docs/pages/reprojection.md).

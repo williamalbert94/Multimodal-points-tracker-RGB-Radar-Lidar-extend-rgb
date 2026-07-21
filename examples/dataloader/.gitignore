@@ -3,3 +3,4 @@
 # regenerate locally instead of committing them.
 check/
 check_projection/
+check_projection_adjusted/
