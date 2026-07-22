@@ -1,0 +1,62 @@
+# Experimento C: atacar el déficit de la clase MÓVIL.
+#
+# Parte del Experimento A (v_r_comp, in_channels=3) y cambia dos cosas:
+#
+# 1. GT con margen (gt_box_margin 0.25)
+#    Las cajas anotadas sobre LiDAR son muy ajustadas para el radar: medido sobre
+#    957 objetos móviles, el 7.3% no capturaba ni un punto solo por eso. Con 25 cm
+#    a cada lado se recuperan, con apenas 3.4% de contaminación.
+#
+# 2. Pérdida enfocada en lo móvil
+#    Antes: 0.4 móvil / 0.6 estático, o sea 1.5x MÁS peso a lo estático — al revés
+#    de lo que necesitamos. Ahora se invierte (0.7 / 0.3) y se suma Focal Loss,
+#    que le baja el peso a los puntos estáticos fáciles (que son ~94% del total y
+#    ahogan el gradiente de los móviles).
+
+exp_name: seg_exp_C_movil
+mode: train
+cuda_device: "0"
+seed: 5012
+
+dataset_path: /project/view_of_delft_PUBLIC
+num_points: 2048
+in_channels: 3                     # incluye v_r_comp (velocidad compensada)
+batch_size: 2
+num_workers: 4
+shuffle: false
+static_object_handling: filter
+fusion: none
+fusion_radius: 0.5
+
+aug: false
+min_obj_points: 2
+
+# ── GT ────────────────────────────────────────────────────────────────────────
+gt_box_margin: 0.25                # metros extra a cada lado de la caja
+
+# ── Modelo ────────────────────────────────────────────────────────────────────
+extractor: LocalGlobalFusionSimple
+
+# ── Pérdida enfocada en la clase móvil ────────────────────────────────────────
+# L = BCE(0.7 móvil / 0.3 estático) + 0.6*Dice + 1.0*Focal + 0.2*Contraste
+w_moving: 0.7                      # antes 0.4  <- ahora pesa MÁS lo móvil
+w_static: 0.3                      # antes 0.6
+dice_weight: 0.6
+focal_weight: 1.0                  # Focal Loss activada
+focal_alpha: 0.75                  # favorece la clase móvil
+focal_gamma: 2.0                   # castiga lo ya aprendido
+feat_contrast_weight: 0.2
+
+# ── Optimización ──────────────────────────────────────────────────────────────
+epochs: 95
+lr: 0.0002
+weight_decay: 0.0001
+scheduler_patience: 5
+scheduler_factor: 0.5
+scheduler_min_lr: 0.000001
+
+val_every: 2
+checkpoint_dir: /project/tracker/checkpoints
+
+mlflow_enabled: true
+mlflow_experiment: segmentacion_vod

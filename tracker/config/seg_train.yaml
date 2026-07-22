@@ -1,0 +1,56 @@
+# Recreación del experimento que funcionó: segmentation_phase1_testing20482
+# (mejor mIoU de validación = 0.6551).
+#
+# IMPORTANTE: en ese run el 97% del rendimiento (mIoU 0.6381 de 0.6551) se logró
+# en la fase de PRETRAIN, que es solo segmentación — exactamente lo que hace esta
+# etapa. El flow (peso 0.05, activo recién en la época 62) solo sumó +0.017 mIoU
+# con un LR minúsculo, así que en seg-only apuntamos a ~0.63-0.64.
+
+# ── Experimento ───────────────────────────────────────────────────────────────
+exp_name: segmentation_phase1_recreacion
+mode: train
+cuda_device: "0"
+seed: 5012
+
+# ── Datos ─────────────────────────────────────────────────────────────────────
+dataset_path: /project/view_of_delft_PUBLIC
+num_points: 2048                   # como el ganador (no 512): muestreo denso de la nube
+in_channels: 2                     # RCS y velocidad radial
+batch_size: 2
+num_workers: 4
+shuffle: false
+static_object_handling: filter     # solo objetos en movimiento (motion segmentation, como RaTrack)
+fusion: none
+fusion_radius: 0.5
+
+# ── Aumentación ───────────────────────────────────────────────────────────────
+aug: false                         # el ganador entrenaba sin augmentación
+
+# ── GT por punto ──────────────────────────────────────────────────────────────
+min_obj_points: 2
+
+# ── Modelo ────────────────────────────────────────────────────────────────────
+extractor: LocalGlobalFusionSimple
+
+# ── Pérdida (misma combinación del ganador) ───────────────────────────────────
+# L = 1.0*BCE + 0.6*Dice + 0.2*FeatureContrast
+w_moving: 0.4                      # BCE baseline (0.4 móvil / 0.6 estático)
+w_static: 0.6
+dice_weight: 0.6
+feat_contrast_weight: 0.2
+
+# ── Optimización ──────────────────────────────────────────────────────────────
+epochs: 95
+lr: 0.0002
+weight_decay: 0.0001
+scheduler_patience: 5
+scheduler_factor: 0.5
+scheduler_min_lr: 0.000001
+
+# ── Validación y checkpoints ──────────────────────────────────────────────────
+val_every: 2
+checkpoint_dir: /project/tracker/checkpoints
+
+# ── MLflow ────────────────────────────────────────────────────────────────────
+mlflow_enabled: true
+mlflow_experiment: segmentacion_vod

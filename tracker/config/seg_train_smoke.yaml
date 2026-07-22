@@ -1,0 +1,42 @@
+# Config CORTO para ver rápido la curva de mIoU (no es el entrenamiento final).
+# Igual que seg_train.yaml pero con pocas épocas y validando en cada una.
+exp_name: seg_smoke
+mode: train
+cuda_device: "0"
+
+dataset_path: /project/view_of_delft_PUBLIC
+num_points: 256
+in_channels: 2
+batch_size: 4
+num_workers: 4
+shuffle: false
+static_object_handling: filter
+fusion: none
+fusion_radius: 0.5
+
+aug: true
+augmentation:
+  rotation_range: 45
+  jitter_std: 0.01
+  scaling_range: [0.9, 1.1]
+  dropout_ratio: 0.1
+
+min_obj_points: 1
+
+extractor: LocalGlobalFusionSimple
+
+w_moving: 0.4
+w_static: 0.6
+dice_weight: 0.0
+
+epochs: 5
+lr: 0.001
+weight_decay: 0.0001
+lr_step: 10
+lr_gamma: 0.7
+
+val_every: 1
+checkpoint_dir: /project/tracker/checkpoints
+
+mlflow_enabled: true
+mlflow_experiment: segmentacion_vod

@@ -39,10 +39,22 @@ Modes
 
 Feature widths
 --------------
-``none`` / ``lidar_base`` / ``matched`` emit **2** feature channels `(RCS, v_r)`,
-so the network is unchanged. ``radar_base`` emits **5** — the model's extractor
-must then be built with `in_channels=5`; the loader raises if that is
-inconsistent rather than letting shapes fail deep inside the network.
+Todos los modos arrastran los **3** canales de radar `(RCS, v_r, v_r_comp)`.
+
+Ojo con `v_r_comp` (la velocidad radial COMPENSADA por el ego-movimiento): es el
+canal que mejor separa móvil de estático. Medido sobre 48 frames de VoD:
+
+    |v_r|      cruda        móvil 1.10   estático 3.74   <- confunde: el estático
+                                                            "parece" más rápido
+    |v_r_comp| compensada   móvil 1.40   estático 0.008  <- separación casi perfecta
+
+Una versión anterior de este módulo recortaba con `radar_feat[:, :2]` y botaba
+justo `v_r_comp`, así que activar la fusión echaba a perder la mejor señal. Por
+eso ahora se conservan los tres canales.
+
+Anchos por modo: ``none`` / ``lidar_base`` / ``matched`` -> **3**;
+``radar_base`` -> **6** (los 3 de radar + 3 estadísticas del LiDAR). El extractor
+se debe construir con `in_channels` igual a ese número.
 """
 import numpy as np
 
@@ -53,10 +65,13 @@ except ImportError:                                     # pragma: no cover
 
 MODES = ("none", "lidar_base", "matched", "radar_base")
 
-# Feature channels each mode makes available to the loader.
-# `none` is the pass-through of VoD's raw radar columns [RCS, v_r, v_r_comp];
-# the trainer slices the first two. The fusion modes emit exactly what they use.
-MODE_FEATURE_DIM = {"none": 3, "lidar_base": 2, "matched": 2, "radar_base": 5}
+# Canales de features que entrega cada modo.
+# Todos conservan los 3 de radar [RCS, v_r, v_r_comp]; `radar_base` les suma 3
+# estadísticas del LiDAR (cantidad de vecinos, altura media y rango de altura).
+MODE_FEATURE_DIM = {"none": 3, "lidar_base": 3, "matched": 3, "radar_base": 6}
+
+# Cuántas columnas del radar se arrastran: RCS, v_r y v_r_comp.
+RADAR_FEATS = 3
 
 DEFAULT_RADIUS = 0.5
 
@@ -73,8 +88,8 @@ def fuse(radar_xyz, radar_feat, lidar_xyz, mode="none",
 
     Args:
         radar_xyz:  (R, 3) radar points, radar frame.
-        radar_feat: (R, F) radar attributes; the first two columns are used as
-            `(RCS, v_r)`.
+        radar_feat: (R, F) atributos del radar; se usan las 3 primeras columnas
+            `(RCS, v_r, v_r_comp)`.
         lidar_xyz:  (L, 3) LiDAR points, already transformed into the radar frame.
         mode:       one of `MODES`.
         radius:     association radius in metres.
@@ -90,8 +105,10 @@ def fuse(radar_xyz, radar_feat, lidar_xyz, mode="none",
 
     radar_xyz = np.asarray(radar_xyz, dtype=np.float32).reshape(-1, 3)
     radar_feat = np.asarray(radar_feat, dtype=np.float32).reshape(len(radar_xyz), -1)
-    rf = radar_feat[:, :2] if radar_feat.shape[1] >= 2 else \
-        np.pad(radar_feat, ((0, 0), (0, 2 - radar_feat.shape[1])))
+    # Nos quedamos con los 3 canales del radar (RCS, v_r, v_r_comp). Si vinieran
+    # menos columnas, se rellena con ceros para no romper las formas.
+    rf = radar_feat[:, :RADAR_FEATS] if radar_feat.shape[1] >= RADAR_FEATS else \
+        np.pad(radar_feat, ((0, 0), (0, RADAR_FEATS - radar_feat.shape[1])))
 
     if mode == "none":
         return radar_xyz, rf
@@ -101,8 +118,8 @@ def fuse(radar_xyz, radar_feat, lidar_xyz, mode="none",
 
     lidar_xyz = np.asarray(lidar_xyz, dtype=np.float32).reshape(-1, 3)
     if len(lidar_xyz) == 0 or len(radar_xyz) == 0:
-        # Nothing to associate — fall back to radar so training does not stall.
-        return (radar_xyz, rf) if feature_dim(mode) == 2 else \
+        # No hay con qué asociar: devolvemos el radar para no frenar el entrenamiento.
+        return (radar_xyz, rf) if feature_dim(mode) == RADAR_FEATS else \
             (radar_xyz, np.hstack([rf, np.zeros((len(rf), 3), np.float32)]))
 
     rng = rng or np.random.default_rng()
@@ -116,8 +133,8 @@ def fuse(radar_xyz, radar_feat, lidar_xyz, mode="none",
             lidar_xyz = lidar_xyz[hit]
             idx = idx[hit]
             feats = rf[idx]
-        else:                                    # lidar_base: zeros where no match
-            feats = np.zeros((len(lidar_xyz), 2), np.float32)
+        else:                                    # lidar_base: ceros donde no hubo match
+            feats = np.zeros((len(lidar_xyz), RADAR_FEATS), np.float32)
             feats[hit] = rf[idx[hit]]
 
         pts = lidar_xyz

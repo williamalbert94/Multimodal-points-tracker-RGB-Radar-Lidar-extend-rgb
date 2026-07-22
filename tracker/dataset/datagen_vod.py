@@ -301,7 +301,13 @@ class TrackingDataVOD(Dataset):
                                                    jitter_std=self.jitter_std,
                                                    scaling_range=tuple(self.scaling_range),
                                                    dropout_ratio=self.dropout_ratio)
-                    raw_pc0_comp = augment_point_cloud(raw_pc0_comp,
+                    # OJO: la nube compensada sale con 4 columnas (la 4a es el 1
+                    # homogeneo del np.dot de arriba). augment_point_cloud rota con
+                    # una matriz 3x3, asi que hay que pasarle solo xyz; si no,
+                    # (N,4)@(3,3) revienta con "matmul mismatch". Aguas abajo la nube
+                    # compensada se recorta a [:3] igual, por eso quedarnos con xyz
+                    # aca no pierde nada.
+                    raw_pc0_comp = augment_point_cloud(raw_pc0_comp[:, :3],
                                                         rotation_range=self.rotation_range,
                                                         jitter_std=self.jitter_std,
                                                         scaling_range=tuple(self.scaling_range),

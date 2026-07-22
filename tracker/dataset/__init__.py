@@ -20,6 +20,11 @@ from .datagen_vod import TrackingDataVOD
 from .labels_vod import filter_moving_boxes_det
 from .loader_vod import build_dataloader, to_device
 from .fusion_vod import fuse, feature_dim, MODES as FUSION_MODES
+from .gt_labels import (
+    get_bbx_param,
+    moving_point_labels,
+    moving_point_labels_batch,
+)
 
 __all__ = [
     "TrackingDataVOD",
@@ -29,4 +34,7 @@ __all__ = [
     "fuse",
     "feature_dim",
     "FUSION_MODES",
+    "get_bbx_param",
+    "moving_point_labels",
+    "moving_point_labels_batch",
 ]
