@@ -29,6 +29,7 @@ import matplotlib
 # matplotlib.use('TkAgg', force=True)
 import matplotlib.pyplot as plt
 from .labels_vod import filter_moving_boxes_det
+from .fusion_vod import fuse as fuse_sensors, feature_dim as fusion_feature_dim
 from ..utils.motion_utils import compute_box_motion_features
 # Load: raw + label + ego
 
@@ -101,6 +102,24 @@ class TrackingDataVOD(Dataset):
 
         # Static object handling
         self.static_object_handling = getattr(args, 'static_object_handling', 'filter')
+
+        # ── Early LiDAR-radar fusion ────────────────────────────────────────
+        # Off by default, so existing configs keep the radar-only behaviour
+        # byte for byte. See fusion_vod.py for the modes and why more than one
+        # exists (the naive LiDAR-base association leaves ~95% of points with
+        # null radar attributes at this sensor density).
+        self.fusion = getattr(args, 'fusion', 'none')
+        self.fusion_radius = float(getattr(args, 'fusion_radius', 0.5))
+        # Cap for the LiDAR-based modes; without it they return ~178k points.
+        self.fusion_max_points = int(getattr(args, 'fusion_max_points',
+                                             max(4 * getattr(args, 'num_points', 256), 4096)))
+        self.feature_dim = fusion_feature_dim(self.fusion)
+        if self.fusion != 'none':
+            print(f"[fusion] mode={self.fusion} radius={self.fusion_radius}m "
+                  f"max_points={self.fusion_max_points} -> {self.feature_dim} feature channels")
+            if self.feature_dim != 2:
+                print(f"[fusion] NOTE: build the extractor with in_channels="
+                      f"{self.feature_dim} (default is 2)")
 
         # set params
         self.dir = data_dir
@@ -216,6 +235,24 @@ class TrackingDataVOD(Dataset):
 
                 comp_hom = np.hstack((raw_pc0, np.ones((raw_pc0.shape[0], 1))))
                 raw_pc0_comp = np.dot(comp_hom, np.linalg.inv(ego_motion.T))
+
+                # ── Early fusion ────────────────────────────────────────────
+                # Runs after the extrinsic (LiDAR is already in the radar frame)
+                # and after ego-motion compensation, so association happens in a
+                # single consistent frame. The compensated cloud is rebuilt from
+                # the fused points with the same T_ego, keeping the pair aligned.
+                if self.fusion != 'none':
+                    rng = np.random.default_rng(current_frame)   # reproducible
+                    raw_pc0, features0 = fuse_sensors(
+                        raw_pc0, features0, raw_pc0_lidar[:, :3],
+                        mode=self.fusion, radius=self.fusion_radius,
+                        max_points=self.fusion_max_points, rng=rng)
+                    raw_pc1, features1 = fuse_sensors(
+                        raw_pc1, features1, raw_pc1_lidar[:, :3],
+                        mode=self.fusion, radius=self.fusion_radius,
+                        max_points=self.fusion_max_points, rng=rng)
+                    comp_hom = np.hstack((raw_pc0, np.ones((raw_pc0.shape[0], 1))))
+                    raw_pc0_comp = np.dot(comp_hom, np.linalg.inv(ego_motion.T))
 
                 curr_idx = current_frame + 1
 

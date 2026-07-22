@@ -19,10 +19,14 @@ async copies).
 from .datagen_vod import TrackingDataVOD
 from .labels_vod import filter_moving_boxes_det
 from .loader_vod import build_dataloader, to_device
+from .fusion_vod import fuse, feature_dim, MODES as FUSION_MODES
 
 __all__ = [
     "TrackingDataVOD",
     "filter_moving_boxes_det",
     "build_dataloader",
     "to_device",
+    "fuse",
+    "feature_dim",
+    "FUSION_MODES",
 ]

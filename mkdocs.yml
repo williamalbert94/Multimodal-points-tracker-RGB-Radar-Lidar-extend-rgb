@@ -26,3 +26,4 @@ nav:
   - Installation: pages/installation.md
   - Documentation: pages/documentation.md
   - 3D->2D reprojection: pages/reprojection.md
+  - LiDAR-radar fusion: pages/fusion.md

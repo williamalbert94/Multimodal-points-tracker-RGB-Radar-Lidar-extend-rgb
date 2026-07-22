@@ -15,8 +15,17 @@ services:
       - USE_NEW_NVSTREAMMUX=yes
       - GST_DEBUG=2
       - MLFLOW_TRACKING_URI=http://mlflow:5000
+      # FiftyOne must bind to 0.0.0.0, not localhost, to be reachable from the
+      # host — inside the container "localhost" is the container itself.
+      - FIFTYONE_DEFAULT_APP_ADDRESS=0.0.0.0
+      - FIFTYONE_DEFAULT_APP_PORT=5151
+      # Keep the embedded MongoDB on the mounted volume so datasets survive
+      # container restarts.
+      - FIFTYONE_DATABASE_DIR=/project/.fiftyone/db
       #- NVIDIA_VISIBLE_DEVICES=0
     image: will/tracker_multimodal_mira
+    ports:
+      - "5151:5151"     # FiftyOne (Voxel51) app
     shm_size: '4gb' #<-- when RUNNING
     user: "root:root"
     volumes:
