@@ -92,13 +92,38 @@ class TrackingDataVOD(Dataset):
         self.eval = args.eval
         self.dataset_path = args.dataset_path
         # Data augmentation parameters
+        # ── Augmentacion ────────────────────────────────────────────────────
+        # OJO, dos razones para NO rotar ni escalar esta nube:
+        #
+        # 1. Las cajas GT no se mueven con los puntos. Al rotar la nube pero
+        #    dejar las cajas quietas, los puntos dejan de caer donde deben:
+        #    medido sobre 100 frames, con rotacion 45 grados se pierde el 82.7%
+        #    de las etiquetas moviles (de 5.50% de puntos moviles se baja a 0.95%).
+        #
+        # 2. Aunque rotaramos tambien las cajas, seguiria estando mal: v_r_comp es
+        #    la velocidad medida A LO LARGO DEL RAYO del sensor al punto. Si se
+        #    rota la nube, la geometria cambia pero la velocidad no, y el canal
+        #    mas informativo que tenemos queda incoherente con las coordenadas.
+        #
+        # El jitter (centimetros) y el dropout si son seguros: no cambian a que
+        # caja pertenece cada punto ni rompen la relacion geometria-Doppler.
         self.aug = getattr(args, 'aug', False)
         if self.aug:
             aug_config = getattr(args, 'augmentation', {})
-            self.rotation_range = aug_config.get('rotation_range', 45) if isinstance(aug_config, dict) else 45
-            self.jitter_std = aug_config.get('jitter_std', 0.01) if isinstance(aug_config, dict) else 0.01
-            self.scaling_range = aug_config.get('scaling_range', [0.9, 1.1]) if isinstance(aug_config, dict) else [0.9, 1.1]
-            self.dropout_ratio = aug_config.get('dropout_ratio', 0.1) if isinstance(aug_config, dict) else 0.1
+            if not isinstance(aug_config, dict):
+                aug_config = {}
+            self.rotation_range = aug_config.get('rotation_range', 0)
+            self.jitter_std = aug_config.get('jitter_std', 0.02)
+            self.scaling_range = aug_config.get('scaling_range', None)
+            self.dropout_ratio = aug_config.get('dropout_ratio', 0.1)
+
+            if self.rotation_range:
+                print(f"[aug] AVISO: rotation_range={self.rotation_range} != 0. "
+                      "Las cajas GT no rotan con los puntos, asi que las etiquetas "
+                      "moviles se van a corromper (medido: -82.7%). Usa 0.")
+            if self.scaling_range and self.scaling_range[0] != self.scaling_range[1]:
+                print(f"[aug] AVISO: scaling_range={self.scaling_range} escala la nube "
+                      "pero no las cajas ni la velocidad. Usa null.")
 
         # Static object handling
         self.static_object_handling = getattr(args, 'static_object_handling', 'filter')
@@ -294,12 +319,12 @@ class TrackingDataVOD(Dataset):
                     raw_pc0 = augment_point_cloud(raw_pc0,
                                                    rotation_range=self.rotation_range,
                                                    jitter_std=self.jitter_std,
-                                                   scaling_range=tuple(self.scaling_range),
+                                                   scaling_range=self.scaling_range,
                                                    dropout_ratio=self.dropout_ratio)
                     raw_pc1 = augment_point_cloud(raw_pc1,
                                                    rotation_range=self.rotation_range,
                                                    jitter_std=self.jitter_std,
-                                                   scaling_range=tuple(self.scaling_range),
+                                                   scaling_range=self.scaling_range,
                                                    dropout_ratio=self.dropout_ratio)
                     # OJO: la nube compensada sale con 4 columnas (la 4a es el 1
                     # homogeneo del np.dot de arriba). augment_point_cloud rota con
@@ -310,7 +335,7 @@ class TrackingDataVOD(Dataset):
                     raw_pc0_comp = augment_point_cloud(raw_pc0_comp[:, :3],
                                                         rotation_range=self.rotation_range,
                                                         jitter_std=self.jitter_std,
-                                                        scaling_range=tuple(self.scaling_range),
+                                                        scaling_range=self.scaling_range,
                                                         dropout_ratio=self.dropout_ratio)
 
                 # Successfully loaded all data

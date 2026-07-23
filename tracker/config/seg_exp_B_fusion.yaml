@@ -36,8 +36,26 @@ static_object_handling: filter
 fusion: radar_base
 fusion_radius: 2.0                 # radio en metros para mirar el LiDAR vecino
 
-aug: false
+# ── Augmentación SEGURA ───────────────────────────────────────────────────────
+# Solo jitter y dropout. NO rotación ni escalado, por dos motivos medidos:
+#  1. Las cajas GT no rotan con los puntos -> rotar 45 grados destruye el 82.7%
+#     de las etiquetas móviles (verificado sobre 100 frames).
+#  2. v_r_comp es la velocidad a lo largo del rayo del sensor: rotar la nube deja
+#     la geometría y el Doppler incoherentes, y ese es el canal más informativo.
+# Con jitter+dropout las etiquetas se conservan (medido: +0.8%, solo ruido).
+aug: true
+augmentation:
+  rotation_range: 0                # NO tocar: rompe las etiquetas y el Doppler
+  scaling_range: null              # NO tocar: rompe la relación rango-velocidad
+  jitter_std: 0.02                 # 2 cm, simula ruido de medición del radar
+  dropout_ratio: 0.1               # simula returns perdidos
+
+# Objetos con menos de estos puntos van a la máscara de IGNORAR: no se cuentan
+# como móviles ni como estáticos, ni en la pérdida ni en la métrica. Con 2 se
+# ignoran solo los objetos de 1 punto (2.2% de los puntos móviles), que son
+# imposibles de segmentar y solo meten ruido. Con 3 se ignoran los de 1-2 (6.9%).
 min_obj_points: 2
+
 gt_box_margin: 0.25
 
 extractor: LocalGlobalFusionSimple
@@ -59,6 +77,9 @@ scheduler_factor: 0.5
 scheduler_min_lr: 0.000001
 
 val_every: 2
+# Si el mIoU de val no mejora en 10 validaciones (20 épocas), se corta.
+# En el experimento C el pico fue en la época 22 y se gastaron 73 más al pedo.
+early_stop_patience: 10
 checkpoint_dir: /project/tracker/checkpoints
 
 mlflow_enabled: true

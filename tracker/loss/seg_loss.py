@@ -11,7 +11,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
-def motion_seg_loss_baseline(pred_cls, gt_cls, w_moving=0.4, w_static=0.6):
+def motion_seg_loss_baseline(pred_cls, gt_cls, w_moving=0.4, w_static=0.6, valid=None):
     """BCE ponderado entre puntos móviles y estáticos (baseline RaTrack).
 
     Se calcula el BCE por separado en los puntos móviles y en los estáticos, y se
@@ -31,6 +31,12 @@ def motion_seg_loss_baseline(pred_cls, gt_cls, w_moving=0.4, w_static=0.6):
     moving_mask = gt_bool                 # puntos móviles
     static_mask = ~gt_bool                # puntos estáticos
 
+    # `valid` saca de la cuenta los puntos marcados para ignorar.
+    if valid is not None:
+        v = valid.bool()
+        moving_mask = moving_mask & v
+        static_mask = static_mask & v
+
     pred_cls = pred_cls.squeeze(1)        # [B, N]
 
     # Si alguna clase no tiene puntos en el batch, su término es 0 (sin romper).
@@ -47,7 +53,7 @@ def motion_seg_loss_baseline(pred_cls, gt_cls, w_moving=0.4, w_static=0.6):
     return w_moving * loss_pos + w_static * loss_neg
 
 
-def soft_dice_loss(pred_cls, gt_cls, smooth=1e-6):
+def soft_dice_loss(pred_cls, gt_cls, smooth=1e-6, valid=None):
     """Soft Dice para segmentación binaria.
 
     Optimiza directamente el coeficiente Dice (el solape entre lo predicho y el
@@ -63,6 +69,9 @@ def soft_dice_loss(pred_cls, gt_cls, smooth=1e-6):
     """
     pred = pred_cls.squeeze(1)                        # [B, N]
     gt = gt_cls.float()
+    if valid is not None:                             # los ignorados no suman
+        v = valid.float()
+        pred, gt = pred * v, gt * v
 
     intersection = (pred * gt).sum(dim=-1)            # [B]
     union = pred.sum(dim=-1) + gt.sum(dim=-1)         # [B]
@@ -71,7 +80,7 @@ def soft_dice_loss(pred_cls, gt_cls, smooth=1e-6):
     return (1.0 - dice).mean()
 
 
-def focal_loss(pred_cls, gt_cls, alpha=0.75, gamma=2.0, eps=1e-7):
+def focal_loss(pred_cls, gt_cls, alpha=0.75, gamma=2.0, eps=1e-7, valid=None):
     """Focal loss binaria: le baja el volumen a lo fácil y se concentra en lo difícil.
 
     El problema acá es que solo ~6% de los puntos son móviles. Con un BCE normal,
@@ -97,10 +106,14 @@ def focal_loss(pred_cls, gt_cls, alpha=0.75, gamma=2.0, eps=1e-7):
     p_t = p * gt + (1 - p) * (1 - gt)
     alpha_t = alpha * gt + (1 - alpha) * (1 - gt)
 
-    return (-alpha_t * (1 - p_t).pow(gamma) * torch.log(p_t)).mean()
+    perdida = -alpha_t * (1 - p_t).pow(gamma) * torch.log(p_t)
+    if valid is not None:                             # promedio solo sobre validos
+        v = valid.float()
+        return (perdida * v).sum() / v.sum().clamp(min=1.0)
+    return perdida.mean()
 
 
-def feature_contrast_loss(features, gt_cls):
+def feature_contrast_loss(features, gt_cls, valid=None):
     """Separa en el espacio de features a los puntos móviles de los estáticos.
 
     Para cada frame calcula el centroide (media) de las features de los puntos
@@ -116,11 +129,15 @@ def feature_contrast_loss(features, gt_cls):
     Returns:
         Pérdida escalar en [0, 1].
     """
-    total, valid = 0.0, 0
+    total, n_frames = 0.0, 0
     for b in range(features.shape[0]):
         feat_b = features[b]                          # [C, N]
         moving_mask = gt_cls[b].bool()                # [N]
         static_mask = ~moving_mask
+        if valid is not None:
+            v = valid[b].bool()
+            moving_mask = moving_mask & v
+            static_mask = static_mask & v
 
         # Necesitamos que el frame tenga puntos de ambas clases.
         if moving_mask.sum() == 0 or static_mask.sum() == 0:
@@ -130,12 +147,12 @@ def feature_contrast_loss(features, gt_cls):
         c_sta = F.normalize(feat_b[:, static_mask].mean(dim=1), dim=0)
         cos = (c_mov * c_sta).sum()
         total = total + (1.0 + cos) / 2.0
-        valid += 1
+        n_frames += 1
 
-    if valid == 0:
+    if n_frames == 0:
         # Sin frames válidos: devolvemos 0 pero atado al grafo (para no romper).
         return features.sum() * 0.0
-    return total / valid
+    return total / n_frames
 
 
 class SegLoss(nn.Module):
@@ -163,7 +180,7 @@ class SegLoss(nn.Module):
         self.focal_alpha = focal_alpha
         self.focal_gamma = focal_gamma
 
-    def forward(self, pred_cls, gt_cls, features=None):
+    def forward(self, pred_cls, gt_cls, features=None, valid=None):
         """
         Args:
             pred_cls: [B, 1, N] probabilidades predichas.
@@ -173,22 +190,24 @@ class SegLoss(nn.Module):
         Returns:
             (loss_total, dict con el desglose de cada término para logging).
         """
-        bce = motion_seg_loss_baseline(pred_cls, gt_cls, self.w_moving, self.w_static)
+        bce = motion_seg_loss_baseline(pred_cls, gt_cls, self.w_moving,
+                                       self.w_static, valid=valid)
         parts = {"bce": bce.item()}
         total = bce
 
         if self.dice_weight > 0:
-            dice = soft_dice_loss(pred_cls, gt_cls)
+            dice = soft_dice_loss(pred_cls, gt_cls, valid=valid)
             total = total + self.dice_weight * dice
             parts["dice"] = dice.item()
 
         if self.focal_weight > 0:
-            focal = focal_loss(pred_cls, gt_cls, self.focal_alpha, self.focal_gamma)
+            focal = focal_loss(pred_cls, gt_cls, self.focal_alpha,
+                               self.focal_gamma, valid=valid)
             total = total + self.focal_weight * focal
             parts["focal"] = focal.item()
 
         if self.feat_contrast_weight > 0 and features is not None:
-            contrast = feature_contrast_loss(features, gt_cls)
+            contrast = feature_contrast_loss(features, gt_cls, valid=valid)
             total = total + self.feat_contrast_weight * contrast
             parts["contrast"] = float(contrast)
 

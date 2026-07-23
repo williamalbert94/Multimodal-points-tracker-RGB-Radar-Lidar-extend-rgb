@@ -92,7 +92,13 @@ def barrer_umbral(probs, gts, umbrales=None):
 # Predicción de un frame
 # ─────────────────────────────────────────────────────────────────────────────
 
-def predecir_frame(net, puntos, feats, num_points, in_channels, device="cuda"):
+def _a_tensor(arr, idx, cols, device):
+    """Toma las filas `idx` y las primeras `cols` columnas -> tensor [1, cols, P]."""
+    return torch.from_numpy(arr[idx, :cols]).float().T.unsqueeze(0).to(device)
+
+
+def predecir_frame(net, puntos, feats, num_points, in_channels, device="cuda",
+                   puntos_prev=None, feats_prev=None, puntos_comp=None):
     """Devuelve la probabilidad de "móvil" para cada punto ORIGINAL de la nube.
 
     Repite los puntos de forma determinística hasta `num_points`, corre la red y
@@ -100,10 +106,12 @@ def predecir_frame(net, puntos, feats, num_points, in_channels, device="cuda"):
 
     Args:
         net: la red ya en modo eval.
-        puntos: (N, 3) coordenadas del radar.
+        puntos: (N, 3) coordenadas del radar del frame actual.
         feats:  (N, C) atributos del radar.
         num_points: cuántos puntos espera la red.
         in_channels: cuántos canales de atributos usa la red.
+        puntos_prev / feats_prev: frame anterior (solo si la red usa rama temporal).
+        puntos_comp: frame actual compensado por ego-movimiento.
 
     Returns:
         (N,) probabilidades por punto original.
@@ -113,11 +121,20 @@ def predecir_frame(net, puntos, feats, num_points, in_channels, device="cuda"):
     repes = int(np.ceil(num_points / n))
     idx = np.tile(np.arange(n), repes)[:num_points]
 
-    pc = torch.from_numpy(puntos[idx, :3]).float().T.unsqueeze(0).to(device)      # [1,3,P]
-    ft = torch.from_numpy(feats[idx, :in_channels]).float().T.unsqueeze(0).to(device)  # [1,C,P]
+    pc = _a_tensor(puntos, idx, 3, device)                       # [1,3,P]
+    ft = _a_tensor(feats, idx, in_channels, device)              # [1,C,P]
+
+    pc2 = ft2 = pc_comp = None
+    if getattr(net, "use_temporal", False):
+        # El frame anterior se muestrea igual (tiene otra cantidad de puntos).
+        m = len(puntos_prev)
+        idx2 = np.tile(np.arange(m), int(np.ceil(num_points / m)))[:num_points]
+        pc2 = _a_tensor(puntos_prev, idx2, 3, device)
+        ft2 = _a_tensor(feats_prev, idx2, in_channels, device)
+        pc_comp = _a_tensor(puntos_comp, idx, 3, device)
 
     with torch.no_grad():
-        seg, _ = net(pc, ft)                             # [1, 1, P]
+        seg, _ = net(pc, ft, pc2, ft2, pc_comp)          # [1, 1, P]
     prob_muestreada = seg.squeeze().cpu().numpy()        # (P,)
 
     # Promediamos las copias: cada punto original recibe la media de sus repeticiones.
@@ -211,7 +228,9 @@ def main():
         gt = moving_point_labels(lbl1, pc_t, transforms,
                                  margen=float(getattr(cfg, "gt_box_margin", 0.0))).numpy().astype(bool)
         prob = predecir_frame(net, puntos, feats, cfg.num_points,
-                              int(getattr(cfg, "in_channels", 2)))
+                              int(getattr(cfg, "in_channels", 2)),
+                              puntos_prev=muestra[1], feats_prev=muestra[3],
+                              puntos_comp=muestra[4])
 
         frames.append({"pts": puntos[:, :3], "prob": prob, "gt": gt,
                        "clip": clip, "nombre": f"{int(num_frame):05d}",

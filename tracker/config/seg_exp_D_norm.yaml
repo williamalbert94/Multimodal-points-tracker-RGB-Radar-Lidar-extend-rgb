@@ -1,0 +1,73 @@
+# Experimento D: normalizar los canales de entrada.
+#
+# Parte del Experimento C (que dio IoU_móvil 0.3714) y cambia dos cosas:
+#
+# 1. NORMALIZACIÓN de features (lo importante)
+#    Medido sobre el split de train: RCS tiene std 14.02 y v_r_comp solo 2.07.
+#    Entrando crudos, el RCS domina numéricamente la primera convolución y
+#    v_r_comp —el canal que mejor separa móvil de estático— queda ahogado. Eso
+#    explica que el modelo salga tan poco confiado (umbral óptimo 0.10, no 0.50).
+#
+# 2. num_points 2048 -> 512
+#    La nube real tiene ~330 puntos. Con 2048 cada punto se repetía 6.4 veces y
+#    el 14.9% de los vecinos más cercanos eran copias exactas (distancia 0), o
+#    sea vecindarios que no aportaban geometría. Con 512 la duplicación baja a
+#    ~1.5x y además entrena ~4x más rápido.
+#
+# SIN fusión a propósito: queremos aislar el efecto de la normalización antes de
+# volver a meter los canales del LiDAR (que empeoraron el Exp B justamente por
+# agregar más desbalance de escalas).
+
+exp_name: seg_exp_D_norm
+mode: train
+cuda_device: "0"
+seed: 5012
+
+dataset_path: /project/view_of_delft_PUBLIC
+num_points: 512
+in_channels: 3                     # RCS, v_r, v_r_comp
+batch_size: 4                      # cabe más batch al bajar los puntos
+num_workers: 4
+shuffle: false
+static_object_handling: filter
+fusion: none
+
+# ── Normalización (estadísticas del split de train) ───────────────────────────
+feat_mean: [-12.4420, -3.1929, 0.0394]
+feat_std:  [14.0193, 2.7273, 2.0658]
+
+# ── Augmentación segura (solo jitter y dropout) ───────────────────────────────
+aug: true
+augmentation:
+  rotation_range: 0                # NO tocar: rompe etiquetas y coherencia Doppler
+  scaling_range: null              # NO tocar: rompe la relación rango-velocidad
+  jitter_std: 0.02
+  dropout_ratio: 0.1
+
+min_obj_points: 2                  # ignora objetos de 1 punto (2.2% de los móviles)
+gt_box_margin: 0.25
+
+extractor: LocalGlobalFusionSimple
+
+# ── Pérdida enfocada en la clase móvil ────────────────────────────────────────
+w_moving: 0.7
+w_static: 0.3
+dice_weight: 0.6
+focal_weight: 1.0
+focal_alpha: 0.75
+focal_gamma: 2.0
+feat_contrast_weight: 0.2
+
+epochs: 95
+lr: 0.0002
+weight_decay: 0.0001
+scheduler_patience: 5
+scheduler_factor: 0.5
+scheduler_min_lr: 0.000001
+
+val_every: 2
+early_stop_patience: 10
+checkpoint_dir: /project/tracker/checkpoints
+
+mlflow_enabled: true
+mlflow_experiment: segmentacion_vod

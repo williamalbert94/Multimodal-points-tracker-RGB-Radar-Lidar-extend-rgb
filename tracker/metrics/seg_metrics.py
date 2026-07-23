@@ -48,7 +48,7 @@ def metricas_de_conteos(tp, fp, fn, tn):
     }
 
 
-def contar_confusion(pred_seg, gt_seg, threshold=0.5):
+def contar_confusion(pred_seg, gt_seg, threshold=0.5, valid=None):
     """Cuenta TP/FP/FN/TN de un batch.
 
     Args:
@@ -61,11 +61,16 @@ def contar_confusion(pred_seg, gt_seg, threshold=0.5):
     """
     pred = (pred_seg.squeeze(1) > threshold).bool()
     gt = gt_seg.bool()
+
+    # Los puntos marcados para ignorar no cuentan ni a favor ni en contra: se
+    # multiplica cada conteo por la máscara de válidos.
+    v = torch.ones_like(pred) if valid is None else valid.bool()
+
     return (
-        float(torch.sum(pred & gt)),
-        float(torch.sum(pred & ~gt)),
-        float(torch.sum(~pred & gt)),
-        float(torch.sum(~pred & ~gt)),
+        float(torch.sum(pred & gt & v)),                    # TP
+        float(torch.sum(pred & ~gt & v)),                   # FP
+        float(torch.sum(~pred & gt & v)),                   # FN
+        float(torch.sum(~pred & ~gt & v)),                  # TN
     )
 
 
@@ -95,9 +100,9 @@ class SegMetricAccumulator:
     def reset(self):
         self.tp = self.fp = self.fn = self.tn = 0.0
 
-    def update(self, pred_seg, gt_seg):
-        """Suma los conteos de un batch."""
-        tp, fp, fn, tn = contar_confusion(pred_seg, gt_seg, self.threshold)
+    def update(self, pred_seg, gt_seg, valid=None):
+        """Suma los conteos de un batch (ignorando los puntos no válidos)."""
+        tp, fp, fn, tn = contar_confusion(pred_seg, gt_seg, self.threshold, valid)
         self.tp += tp
         self.fp += fp
         self.fn += fn

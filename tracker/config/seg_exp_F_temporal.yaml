@@ -1,0 +1,79 @@
+# Experimento F: rama TEMPORAL (comparar dos frames).
+#
+# Es el Experimento E (el mejor hasta ahora: IoU_móvil 0.4406) con UN cambio:
+# se activa el correlador entre el frame actual y el anterior.
+#
+# Por qué es la palanca más grande que nos queda
+# ----------------------------------------------
+# Medido sobre el checkpoint de E, el recall por nivel de Doppler es:
+#
+#     |v_r_comp| > 2.00  ->  recall 0.95
+#     |v_r_comp| < 0.10  ->  recall 0.13
+#
+# O sea que con un solo frame la red es, en la práctica, un detector de Doppler.
+# Los objetos que cruzan perpendicular al sensor tienen v_r ~ 0 y son
+# numéricamente idénticos a un poste: la información NO está en el frame.
+#
+# Techo estimado si se arreglaran esos fallos (sobre IoU_móvil 0.4569 medido):
+#     arreglando |v_r_comp| < 0.50  ->  0.5882  (+0.131)
+#     arreglando |v_r_comp| < 1.00  ->  0.6563  (+0.199)
+#
+# El correlador compara la nube actual COMPENSADA por ego-movimiento contra la
+# del frame anterior: si un punto es estático cae donde estaba; si se mueve,
+# queda desplazado. Esa señal es independiente del Doppler.
+
+exp_name: seg_exp_F_temporal
+mode: train
+cuda_device: "0"
+seed: 5012
+
+dataset_path: /project/view_of_delft_PUBLIC
+num_points: 2048                   # igual que C (NO bajar: ver nota de arriba)
+in_channels: 3                     # RCS, v_r, v_r_comp
+batch_size: 2                      # igual que C
+num_workers: 4
+shuffle: false
+static_object_handling: filter
+fusion: none
+fusion_radius: 0.5
+
+# ── EL ÚNICO CAMBIO respecto a C ──────────────────────────────────────────────
+# Estadísticas medidas sobre el split de train. El RCS tiene std 14.02 contra
+# 2.07 de v_r_comp: entrando crudos, el RCS domina la primera convolución y el
+# canal que mejor separa móvil de estático queda ahogado.
+feat_mean: [-12.4420, -3.1929, 0.0394]
+feat_std:  [14.0193, 2.7273, 2.0658]
+
+# ── EL ÚNICO CAMBIO respecto a E ──────────────────────────────────────────────
+use_temporal: true
+temporal_knn: 8                    # vecinos en el frame anterior (8 y no 16: con 16 el pico de GPU era 9.9 GB de 12)
+
+# ── Todo lo de abajo es idéntico a C ──────────────────────────────────────────
+aug: false
+min_obj_points: 0                  # 0 = como corrió C (máscara de ignorar apagada)
+gt_box_margin: 0.25
+
+extractor: LocalGlobalFusionSimple
+
+w_moving: 0.7
+w_static: 0.3
+dice_weight: 0.6
+focal_weight: 1.0
+focal_alpha: 0.75
+focal_gamma: 2.0
+feat_contrast_weight: 0.2
+
+epochs: 95
+lr: 0.0002
+weight_decay: 0.0001
+scheduler_patience: 5
+scheduler_factor: 0.5
+scheduler_min_lr: 0.000001
+
+val_every: 2
+# C llegó a su pico en la época 22 y gastó 73 más sin superarlo.
+early_stop_patience: 12
+checkpoint_dir: /project/tracker/checkpoints
+
+mlflow_enabled: true
+mlflow_experiment: segmentacion_vod
