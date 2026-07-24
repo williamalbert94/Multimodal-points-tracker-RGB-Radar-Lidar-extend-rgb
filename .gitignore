@@ -1,0 +1,3 @@
+external/lib/build/
+external/lib/dist/
+external/lib/*.egg-info/
