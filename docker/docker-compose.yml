@@ -6,6 +6,9 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile
+      # Host networking for the build's RUN steps (apt-get/conda/pip) — the
+      # default bridge network has no DNS/egress on this host.
+      network: host
     stop_signal: SIGINT
     environment:
       - SERVICE_HOST=core
@@ -30,7 +33,7 @@ services:
     user: "root:root"
     volumes:
       - ..:/project
-      - /local/william/tesis/datasets/multimodal/view_of_delft_PUBLIC:/project/view_of_delft_PUBLIC
+      - /home/williamramirez/view_of_delft_PUBLIC:/project/view_of_delft_PUBLIC
       - /etc/passwd:/etc/passwd:ro
       - /etc/group:/etc/group:ro
       - ./root:/home/${USER}
@@ -56,6 +59,7 @@ services:
     build:
       context: .
       dockerfile: mlflow.Dockerfile
+      network: host
     ports:
       - "5000:5000"
     volumes:
