@@ -106,6 +106,17 @@ def main(config_path):
 
 
 if __name__ == "__main__":
+    # DataLoader workers con multiprocessing: usar 'spawn', no 'fork'.
+    # El proceso principal inicializa CUDA (semilla, y model.to('cuda')) ANTES
+    # de que el training loop cree el iterador del DataLoader. Con 'fork' (el
+    # default en Linux) los workers heredan ese contexto CUDA ya inicializado y
+    # se produce un deadlock: el proceso queda en futex_wait sin imprimir ni la
+    # primera línea de época. 'spawn' arranca cada worker con un intérprete
+    # limpio (sin contexto CUDA heredado), lo que permite num_workers>0 sin
+    # colgarse. Debe llamarse una sola vez, antes de tocar CUDA.
+    import torch.multiprocessing as _mp
+    _mp.set_start_method("spawn", force=True)
+
     # Silenciar avisos ruidosos (numba, etc.) para que el log quede legible.
     warnings.filterwarnings("ignore")
     logging.getLogger("numba").setLevel(logging.CRITICAL)

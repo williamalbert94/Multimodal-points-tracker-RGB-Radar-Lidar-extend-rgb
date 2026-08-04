@@ -1,3 +1,23 @@
 external/lib/build/
 external/lib/dist/
 external/lib/*.egg-info/
+
+# Pesos y checkpoints
+tracker/checkpoints/
+*.pth
+*.pt
+
+# Salidas de inferencia / visualizaciones / resultados
+tracker/results/
+tracker/logs/
+**/vis/
+**/vis_bev/
+
+# Tracking de experimentos y entornos
+mlruns/
+mira/
+.venv/
+
+# Caches de Python
+__pycache__/
+*.pyc

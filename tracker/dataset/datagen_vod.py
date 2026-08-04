@@ -92,13 +92,38 @@ class TrackingDataVOD(Dataset):
         self.eval = args.eval
         self.dataset_path = args.dataset_path
         # Data augmentation parameters
+        # ── Augmentacion ────────────────────────────────────────────────────
+        # OJO, dos razones para NO rotar ni escalar esta nube:
+        #
+        # 1. Las cajas GT no se mueven con los puntos. Al rotar la nube pero
+        #    dejar las cajas quietas, los puntos dejan de caer donde deben:
+        #    medido sobre 100 frames, con rotacion 45 grados se pierde el 82.7%
+        #    de las etiquetas moviles (de 5.50% de puntos moviles se baja a 0.95%).
+        #
+        # 2. Aunque rotaramos tambien las cajas, seguiria estando mal: v_r_comp es
+        #    la velocidad medida A LO LARGO DEL RAYO del sensor al punto. Si se
+        #    rota la nube, la geometria cambia pero la velocidad no, y el canal
+        #    mas informativo que tenemos queda incoherente con las coordenadas.
+        #
+        # El jitter (centimetros) y el dropout si son seguros: no cambian a que
+        # caja pertenece cada punto ni rompen la relacion geometria-Doppler.
         self.aug = getattr(args, 'aug', False)
         if self.aug:
             aug_config = getattr(args, 'augmentation', {})
-            self.rotation_range = aug_config.get('rotation_range', 45) if isinstance(aug_config, dict) else 45
-            self.jitter_std = aug_config.get('jitter_std', 0.01) if isinstance(aug_config, dict) else 0.01
-            self.scaling_range = aug_config.get('scaling_range', [0.9, 1.1]) if isinstance(aug_config, dict) else [0.9, 1.1]
-            self.dropout_ratio = aug_config.get('dropout_ratio', 0.1) if isinstance(aug_config, dict) else 0.1
+            if not isinstance(aug_config, dict):
+                aug_config = {}
+            self.rotation_range = aug_config.get('rotation_range', 0)
+            self.jitter_std = aug_config.get('jitter_std', 0.02)
+            self.scaling_range = aug_config.get('scaling_range', None)
+            self.dropout_ratio = aug_config.get('dropout_ratio', 0.1)
+
+            if self.rotation_range:
+                print(f"[aug] AVISO: rotation_range={self.rotation_range} != 0. "
+                      "Las cajas GT no rotan con los puntos, asi que las etiquetas "
+                      "moviles se van a corromper (medido: -82.7%). Usa 0.")
+            if self.scaling_range and self.scaling_range[0] != self.scaling_range[1]:
+                print(f"[aug] AVISO: scaling_range={self.scaling_range} escala la nube "
+                      "pero no las cajas ni la velocidad. Usa null.")
 
         # Static object handling
         self.static_object_handling = getattr(args, 'static_object_handling', 'filter')
@@ -110,6 +135,19 @@ class TrackingDataVOD(Dataset):
         # null radar attributes at this sensor density).
         self.fusion = getattr(args, 'fusion', 'none')
         self.fusion_radius = float(getattr(args, 'fusion_radius', 0.5))
+        # Multi-frame temporal: si True, además de t-1 se prepara t-2 como un
+        # segundo frame de referencia (el modelo correlaciona contra ambos). t-1
+        # da la señal cercana confiable; t-2 (0.2s) una línea base más ancha que
+        # amplifica el movimiento de objetos LENTOS (bajo Doppler, el mayor modo
+        # de falla). t-2 ya se carga de todas formas (frame_data_last).
+        self.use_multiframe = bool(getattr(args, 'multiframe', False))
+        # Augmentation del gap temporal (solo train): a veces correlaciona contra
+        # t-2 en vez de t-1, para variar la línea base de movimiento. NUNCA en val.
+        self.gap_aug = bool(getattr(args, 'gap_aug', False))
+        # Flujo LiDAR denso: el 2do correlador compara el frame actual contra el
+        # LiDAR DENSO de t-1 (no el radar sparse), para señal de movimiento donde
+        # el radar es ciego. Ocupa el slot del 2do frame de referencia.
+        self.lidar_temporal = bool(getattr(args, 'lidar_temporal', False))
         # Cap for the LiDAR-based modes; without it they return ~178k points.
         self.fusion_max_points = int(getattr(args, 'fusion_max_points',
                                              max(4 * getattr(args, 'num_points', 256), 4096)))
@@ -213,17 +251,23 @@ class TrackingDataVOD(Dataset):
                 raw_pc0_lidar = frame_data_0.lidar_data[:, :3]
                 raw_pc1_lidar = frame_data_1.lidar_data[:, :3]
 
+                # BUGFIX: para llevar puntos LiDAR al frame del RADAR hay que usar
+                # t_radar_lidar (= T_{radar<-lidar}), NO t_lidar_radar (que mapea
+                # radar->lidar, la dirección inversa). Con la transformación vieja
+                # el LiDAR quedaba ~1.8m corrido del radar (verificado: la correcta
+                # deja los puntos a ~0.5m); eso degradaba la fusión radar_base y
+                # hacía que casi ningún punto LiDAR cayera en las cajas móviles.
                 n0_ = raw_pc_last_lidar.shape[0]
                 pts_3d_hom0_ = np.hstack((raw_pc_last_lidar, np.ones((n0_, 1))))
-                raw_pc_last_lidar = homogeneous_transformation(pts_3d_hom0_, transforms_last.t_lidar_radar)
+                raw_pc_last_lidar = homogeneous_transformation(pts_3d_hom0_, transforms_last.t_radar_lidar)
 
                 n1_ = raw_pc0_lidar.shape[0]
                 pts_3d_hom1_ = np.hstack((raw_pc0_lidar, np.ones((n1_, 1))))
-                raw_pc0_lidar = homogeneous_transformation(pts_3d_hom1_, transforms0.t_lidar_radar)
+                raw_pc0_lidar = homogeneous_transformation(pts_3d_hom1_, transforms0.t_radar_lidar)
 
                 n2_ = raw_pc1_lidar.shape[0]
                 pts_3d_hom2_ = np.hstack((raw_pc1_lidar, np.ones((n2_, 1))))
-                raw_pc1_lidar = homogeneous_transformation(pts_3d_hom2_, transforms1.t_lidar_radar)
+                raw_pc1_lidar = homogeneous_transformation(pts_3d_hom2_, transforms1.t_radar_lidar)
 
                 odom_cam_0 = transforms0.t_odom_camera
                 odom_cam_1 = transforms1.t_odom_camera
@@ -235,6 +279,25 @@ class TrackingDataVOD(Dataset):
 
                 comp_hom = np.hstack((raw_pc0, np.ones((raw_pc0.shape[0], 1))))
                 raw_pc0_comp = np.dot(comp_hom, np.linalg.inv(ego_motion.T))
+
+                # ── Augmentation del gap temporal (SOLO en train) ───────────
+                # Data augmentation legítima: en entrenamiento, a veces el frame
+                # "anterior" es t-2 (0.2s) en vez de t-1 (0.1s). Expone al modelo
+                # a movimiento a distintas líneas base -> features de movimiento
+                # más robustas, sobre todo para objetos lentos. En VALIDACIÓN
+                # nunca se aplica (self.eval=True), así el val queda intacto: se
+                # correlaciona siempre contra t-1, como en H. NO reemplaza el
+                # frame de forma fija (eso fue el exp J, que empeoró); acá es
+                # estocástico y solo en train. t-2 ya está cargado.
+                if self.gap_aug and not self.eval and np.random.rand() < 0.5:
+                    raw_pc1 = frame_data_last.radar_data[:, :3]
+                    features1 = frame_data_last.radar_data[:, 3:6]
+                    raw_pc1_lidar = raw_pc_last_lidar
+                    odom_radar_prev = np.dot(transforms_last.t_odom_camera,
+                                             transforms_last.t_camera_radar)
+                    ego_motion = np.dot(np.linalg.inv(odom_radar_0), odom_radar_prev)
+                    comp_hom = np.hstack((raw_pc0, np.ones((raw_pc0.shape[0], 1))))
+                    raw_pc0_comp = np.dot(comp_hom, np.linalg.inv(ego_motion.T))
 
                 # ── Early fusion ────────────────────────────────────────────
                 # Runs after the extrinsic (LiDAR is already in the radar frame)
@@ -253,6 +316,54 @@ class TrackingDataVOD(Dataset):
                         max_points=self.fusion_max_points, rng=rng)
                     comp_hom = np.hstack((raw_pc0, np.ones((raw_pc0.shape[0], 1))))
                     raw_pc0_comp = np.dot(comp_hom, np.linalg.inv(ego_motion.T))
+
+                # ── Multi-frame: SEGUNDO frame anterior (t-2) ───────────────
+                # Además de t-1, se prepara t-2 (frame_data_last) como un segundo
+                # frame de referencia, con su propia fusión LiDAR y su propia
+                # compensación de ego-movimiento (0.2s). El modelo correlaciona el
+                # frame actual contra AMBOS: t-1 da la señal de movimiento cercana
+                # y confiable, t-2 una línea base más ancha que amplifica el
+                # desplazamiento de objetos LENTOS (bajo Doppler). Se probó
+                # reemplazar t-1 por t-2 (exp J) y empeoró; usar los dos es la idea.
+                # t-2 ya está cargado (frame_data_last / raw_pc_last_lidar).
+                if self.lidar_temporal:
+                    # ── Flujo LiDAR denso ──────────────────────────────────
+                    # El segundo correlador compara el frame actual contra el
+                    # LiDAR DENSO de t-1 (ya alineado al frame radar tras el
+                    # bugfix), no contra el radar sparse. El LiDAR cubre densamente
+                    # TODOS los objetos —incluidos los que el radar no ve (bajo
+                    # Doppler)— así que el desplazamiento actual->LiDAR-t-1 aporta
+                    # una señal de movimiento que el radar sparse no captura. La
+                    # métrica sigue siendo sobre puntos de radar (comparable). Las
+                    # features del LiDAR van en cero: el extractor usa su geometría.
+                    lid = raw_pc1_lidar[:, :3]
+                    if len(lid) > self.fusion_max_points:
+                        ridx = np.random.default_rng(int(current_frame) + 555).choice(
+                            len(lid), self.fusion_max_points, replace=False)
+                        lid = lid[ridx]
+                    raw_pc2b = lid
+                    features2b = np.zeros((len(lid), features0.shape[1]), dtype=np.float32)
+                    # actual (ya fundido) compensado a t-1: mismo sistema que el LiDAR t-1
+                    raw_pc0_comp2 = raw_pc0_comp
+                elif self.use_multiframe:
+                    raw_pc2b = frame_data_last.radar_data[:, :3]
+                    features2b = frame_data_last.radar_data[:, 3:6]
+                    odom_radar_prev2 = np.dot(transforms_last.t_odom_camera,
+                                              transforms_last.t_camera_radar)
+                    ego_motion2 = np.dot(np.linalg.inv(odom_radar_0), odom_radar_prev2)
+                    if self.fusion != 'none':
+                        rng2 = np.random.default_rng(int(current_frame) + 777)
+                        raw_pc2b, features2b = fuse_sensors(
+                            raw_pc2b, features2b, raw_pc_last_lidar[:, :3],
+                            mode=self.fusion, radius=self.fusion_radius,
+                            max_points=self.fusion_max_points, rng=rng2)
+                    # nube actual (ya fundida) compensada al sistema de t-2
+                    comp_hom2 = np.hstack((raw_pc0, np.ones((raw_pc0.shape[0], 1))))
+                    raw_pc0_comp2 = np.dot(comp_hom2, np.linalg.inv(ego_motion2.T))
+                else:
+                    # Sin multi-frame: se duplica t-1 para mantener la forma de la
+                    # tupla constante (el trainer ignora estos campos si no aplica).
+                    raw_pc2b, features2b, raw_pc0_comp2 = raw_pc1, features1, raw_pc0_comp
 
                 curr_idx = current_frame + 1
 
@@ -294,12 +405,12 @@ class TrackingDataVOD(Dataset):
                     raw_pc0 = augment_point_cloud(raw_pc0,
                                                    rotation_range=self.rotation_range,
                                                    jitter_std=self.jitter_std,
-                                                   scaling_range=tuple(self.scaling_range),
+                                                   scaling_range=self.scaling_range,
                                                    dropout_ratio=self.dropout_ratio)
                     raw_pc1 = augment_point_cloud(raw_pc1,
                                                    rotation_range=self.rotation_range,
                                                    jitter_std=self.jitter_std,
-                                                   scaling_range=tuple(self.scaling_range),
+                                                   scaling_range=self.scaling_range,
                                                    dropout_ratio=self.dropout_ratio)
                     # OJO: la nube compensada sale con 4 columnas (la 4a es el 1
                     # homogeneo del np.dot de arriba). augment_point_cloud rota con
@@ -310,7 +421,7 @@ class TrackingDataVOD(Dataset):
                     raw_pc0_comp = augment_point_cloud(raw_pc0_comp[:, :3],
                                                         rotation_range=self.rotation_range,
                                                         jitter_std=self.jitter_std,
-                                                        scaling_range=tuple(self.scaling_range),
+                                                        scaling_range=self.scaling_range,
                                                         dropout_ratio=self.dropout_ratio)
 
                 # Successfully loaded all data
@@ -323,8 +434,12 @@ class TrackingDataVOD(Dataset):
                     # Si falla cálculo de motion, usar dict vacío
                     motion_features = {}
 
-                # Retornar con motion features
-                return raw_pc0, raw_pc1, features0, features1, raw_pc0_comp, curr_idx, clip_name, ego_motion, raw_pc_last_lidar, raw_pc0_lidar, raw_pc1_lidar, new_seq, lbl1, lbl2, transforms1, transforms2, motion_features
+                # Retornar con motion features. Los 3 últimos campos (índices
+                # 17-19) son el segundo frame de referencia t-2 para multi-frame:
+                # radar t-2, sus features, y la nube actual compensada a t-2. Si
+                # multiframe está apagado, son duplicados de t-1 (el trainer los
+                # ignora), así la forma de la tupla no cambia.
+                return raw_pc0, raw_pc1, features0, features1, raw_pc0_comp, curr_idx, clip_name, ego_motion, raw_pc_last_lidar, raw_pc0_lidar, raw_pc1_lidar, new_seq, lbl1, lbl2, transforms1, transforms2, motion_features, raw_pc2b, features2b, raw_pc0_comp2
 
             except (ImportError, NameError) as e:
                 # Genuine programming errors: retrying the next frame would fail

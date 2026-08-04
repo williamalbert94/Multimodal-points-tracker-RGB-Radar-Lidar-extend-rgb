@@ -25,7 +25,8 @@ from tracker.model import build_model
 from .collate import sample_points
 
 
-def _prepare_batch(batch, num_points, in_channels, device, gt_margen=0.0):
+def _prepare_batch(batch, num_points, in_channels, device, gt_margen=0.0,
+                   min_puntos=0, multiframe=False):
     """Prepara un batch para el modelo: muestrea puntos y arma el GT.
 
     El dataset entrega una tupla larga; para segmentación solo usamos el frame
@@ -41,24 +42,68 @@ def _prepare_batch(batch, num_points, in_channels, device, gt_margen=0.0):
         ft1:     [B, C, N] features radar (en `device`).
         gt_cls:  [B, N]    etiqueta GT por punto, float (en `device`).
     """
-    raw_pc0 = batch[0]        # tupla de B arrays [N_i, 3]
+    raw_pc0 = batch[0]        # tupla de B arrays [N_i, 3]  -> frame actual (t+1)
+    raw_pc1 = batch[1]        # tupla de B arrays [M_i, 3]  -> frame anterior (t)
     features0 = batch[2]      # tupla de B arrays [N_i, C]
+    features1 = batch[3]      # features del frame anterior
+    raw_pc0_comp = batch[4]   # frame actual compensado por ego-movimiento
     lbl1 = batch[12]          # tupla de B dicts de cajas móviles
     transforms1 = batch[14]   # tupla de B FrameTransformMatrix
 
-    # Concatenamos coords + features por muestra para muestrear con los mismos
-    # índices, y luego separamos.
-    combinado = [np.hstack([pc, ft]) for pc, ft in zip(raw_pc0, features0)]
-    combinado = sample_points(combinado, num_points)          # [B, N, 3+C]
+    # Concatenamos coords + features + nube compensada por muestra, para
+    # muestrear todo con los MISMOS índices y que cada punto conserve su
+    # velocidad y su posición compensada. Luego se separan.
+    combinado = [np.hstack([pc, ft, cp[:, :3]])
+                 for pc, ft, cp in zip(raw_pc0, features0, raw_pc0_comp)]
+    combinado = sample_points(combinado, num_points)          # [B, N, 3+C+3]
 
+    c = 3 + in_channels
     pc1 = combinado[:, :, :3].permute(0, 2, 1).contiguous().to(device)          # [B, 3, N]
-    ft1 = combinado[:, :, 3:3 + in_channels].permute(0, 2, 1).contiguous().to(device)  # [B, C, N]
+    ft1 = combinado[:, :, 3:c].permute(0, 2, 1).contiguous().to(device)         # [B, C, N]
+    # Las 3 últimas columnas son la nube compensada (van al final del hstack).
+    pc1_comp = combinado[:, :, -3:].permute(0, 2, 1).contiguous().to(device)    # [B, 3, N]
+
+    # El frame anterior se muestrea aparte (tiene otra cantidad de puntos).
+    prev = [np.hstack([pc, ft]) for pc, ft in zip(raw_pc1, features1)]
+    prev = sample_points(prev, num_points)                    # [B, N, 3+C]
+    pc2 = prev[:, :, :3].permute(0, 2, 1).contiguous().to(device)               # [B, 3, N]
+    ft2 = prev[:, :, 3:c].permute(0, 2, 1).contiguous().to(device)              # [B, C, N]
 
     # Etiqueta GT por punto (1 = móvil) usando las cajas del mismo frame.
-    gt_cls = moving_point_labels_batch(list(lbl1), pc1, list(transforms1),
-                                       margen=gt_margen).float().to(device)
+    gt_cls, ignorar = moving_point_labels_batch(
+        list(lbl1), pc1, list(transforms1), margen=gt_margen,
+        min_puntos=min_puntos, devolver_ignorar=True)
+    # `valido` es lo contrario de ignorar: los puntos que sí entran a la cuenta.
+    valido = (~ignorar).float().to(device)
 
-    return pc1, ft1, gt_cls
+    out = {
+        "pc1": pc1, "ft1": ft1,
+        "pc2": pc2, "ft2": ft2, "pc1_comp": pc1_comp,
+        "gt": gt_cls.float().to(device), "valido": valido,
+    }
+
+    # Multi-frame: segundo frame de referencia t-2 (índices 17-19 de la tupla).
+    # pc3/ft3 = radar t-2 muestreado; pc1_comp2 = nube actual compensada a t-2,
+    # muestreada con los MISMOS índices que pc1/ft1 (por eso va junto al frame
+    # actual). El correlador usa pc1_comp2 (actual en el sistema de t-2) contra
+    # pc3 (t-2).
+    if multiframe:
+        raw_pc2b = batch[17]
+        features2b = batch[18]
+        raw_pc0_comp2 = batch[19]
+
+        # nube actual + su compensación a t-2, muestreadas con los mismos índices
+        combinado2 = [np.hstack([pc, ft, cp[:, :3]])
+                      for pc, ft, cp in zip(raw_pc0, features0, raw_pc0_comp2)]
+        combinado2 = sample_points(combinado2, num_points)
+        out["pc1_comp2"] = combinado2[:, :, -3:].permute(0, 2, 1).contiguous().to(device)
+
+        prev2 = [np.hstack([pc, ft]) for pc, ft in zip(raw_pc2b, features2b)]
+        prev2 = sample_points(prev2, num_points)
+        out["pc3"] = prev2[:, :, :3].permute(0, 2, 1).contiguous().to(device)
+        out["ft3"] = prev2[:, :, 3:c].permute(0, 2, 1).contiguous().to(device)
+
+    return out
 
 
 def _run_epoch(net, loader, criterion, optimizer, args, device, train=True):
@@ -80,13 +125,22 @@ def _run_epoch(net, loader, criterion, optimizer, args, device, train=True):
     acc = SegMetricAccumulator()
     loss_sum, n_batches = 0.0, 0
 
+    multiframe = bool(getattr(args, "multiframe", False)) or bool(getattr(args, "lidar_temporal", False))
     for batch in loader:
-        pc1, ft1, gt_cls = _prepare_batch(batch, args.num_points, args.in_channels,
-                                          device, getattr(args, "gt_box_margin", 0.0))
+        d = _prepare_batch(
+            batch, args.num_points, args.in_channels, device,
+            getattr(args, "gt_box_margin", 0.0),
+            int(getattr(args, "min_obj_points", 0)),
+            multiframe=multiframe)
+        gt_cls, valido = d["gt"], d["valido"]
 
         with torch.set_grad_enabled(train):
-            seg, feats = net(pc1, ft1)               # [B, 1, N], [B, 256, N]
-            loss, _ = criterion(seg, gt_cls, feats)
+            if multiframe:
+                seg, feats = net(d["pc1"], d["ft1"], d["pc2"], d["ft2"], d["pc1_comp"],
+                                 pc3=d["pc3"], feature3=d["ft3"], pc1_comp2=d["pc1_comp2"])
+            else:
+                seg, feats = net(d["pc1"], d["ft1"], d["pc2"], d["ft2"], d["pc1_comp"])
+            loss, _ = criterion(seg, gt_cls, feats, valid=valido)
 
             if train:
                 optimizer.zero_grad()
@@ -98,7 +152,7 @@ def _run_epoch(net, loader, criterion, optimizer, args, device, train=True):
         # Se acumulan los conteos del batch; el IoU se calcula al final de la
         # época (micro-promedio). Promediar IoUs por batch inflaría el número:
         # los frames sin objetos móviles regalan un 1/3 (ver seg_metrics).
-        acc.update(seg.detach(), gt_cls)
+        acc.update(seg.detach(), gt_cls, valid=valido)
 
     metrics = acc.average()
     metrics["loss"] = loss_sum / max(n_batches, 1)
@@ -148,6 +202,12 @@ def run_train_seg(args, logger, train_loader, val_loader, mlflow_logger=None):
     val_every = int(getattr(args, "val_every", 2))
     best_miou = 0.0
 
+    # Early stopping: si el mIoU de validación no mejora en `paciencia`
+    # validaciones seguidas, se corta. En el experimento C el pico fue en la
+    # época 22 y se gastaron 73 épocas más sin superarlo.
+    paciencia = int(getattr(args, "early_stop_patience", 0))
+    sin_mejorar = 0
+
     for epoch in range(args.epochs):
         lr_actual = optimizer.param_groups[0]["lr"]
         logger.info(f"\n===== Época {epoch + 1}/{args.epochs}  (lr={lr_actual:.6f}) =====")
@@ -177,19 +237,27 @@ def run_train_seg(args, logger, train_loader, val_loader, mlflow_logger=None):
             # Guardar el mejor modelo según mIoU de validación.
             if val_metrics["miou"] > best_miou:
                 best_miou = val_metrics["miou"]
+                sin_mejorar = 0
                 ckpt_path = os.path.join(checkpoint_dir, "best_miou_model.pth")
                 _save_checkpoint(net, ckpt_path, epoch, best_miou)
                 logger.info(f"🏆 Nuevo mejor mIoU={best_miou:.4f} -> guardado en {ckpt_path}")
                 if mlflow_logger:
                     mlflow_logger.log_metrics({"best_miou": best_miou}, step=epoch)
                     mlflow_logger.log_artifact(ckpt_path)
+            else:
+                sin_mejorar += 1
 
             # El scheduler solo avanza cuando hay una validación nueva.
             scheduler.step(val_metrics["miou"])
 
+            if paciencia and sin_mejorar >= paciencia:
+                logger.info(f"\n⏹  Early stopping: {sin_mejorar} validaciones seguidas "
+                            f"sin superar mIoU={best_miou:.4f}. Se corta en la época {epoch + 1}.")
+                break
+
     # Guardar también el último modelo.
     last_path = os.path.join(checkpoint_dir, "last_model.pth")
-    _save_checkpoint(net, last_path, args.epochs - 1, best_miou)
+    _save_checkpoint(net, last_path, epoch, best_miou)
     logger.info(f"\nEntrenamiento terminado. Mejor mIoU={best_miou:.4f}. "
                 f"Último modelo en {last_path}")
     return net

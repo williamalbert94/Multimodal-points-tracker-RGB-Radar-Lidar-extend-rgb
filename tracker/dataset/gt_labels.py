@@ -74,8 +74,20 @@ def get_bbx_param(obj_info, transforms, sensor="radar", margen=0.0):
     return o3d.geometry.OrientedBoundingBox(center.reshape(3, 1), rot, extent.reshape(3, 1))
 
 
-def moving_point_labels(labels, pc, transforms, margen=0.0):
+def moving_point_labels(labels, pc, transforms, margen=0.0, min_puntos=0,
+                        devolver_ignorar=False):
     """Marca qué puntos del radar caen dentro de las cajas móviles.
+
+    Sobre `min_puntos`
+    ------------------
+    Hay objetos móviles que dejan uno o dos returns sueltos de radar. Medido
+    sobre 1009 objetos, los de 1-2 puntos son el 22.3% de los objetos pero
+    aportan apenas el 6.9% de los puntos móviles: son casi imposibles de
+    segmentar y meten mucho ruido en la pérdida.
+
+    Cuando `min_puntos > 0`, esos objetos NO se marcan como estáticos (eso sería
+    enseñarle al modelo algo falso), sino que se devuelven aparte en una máscara
+    de "ignorar", para poder sacarlos tanto de la pérdida como de la métrica.
 
     Args:
         labels: dict {id_objeto: Object_3D} con las cajas móviles del frame
@@ -83,16 +95,21 @@ def moving_point_labels(labels, pc, transforms, margen=0.0):
         pc: tensor [1, 3, N] con los puntos del frame (radar frame, en GPU o CPU).
         transforms: `FrameTransformMatrix` del mismo frame.
         margen: metros extra a cada lado de la caja (ver `get_bbx_param`).
+        min_puntos: objetos con menos de estos puntos van a la máscara de ignorar.
+        devolver_ignorar: si es True devuelve también esa máscara.
 
     Returns:
-        cls: tensor bool [N] en el mismo device que `pc`. True = punto móvil.
+        cls: tensor bool [N]. True = punto móvil.
+        (y si `devolver_ignorar`) ignorar: tensor bool [N] con los puntos que no
+        se deben ni premiar ni castigar.
     """
     num_points = pc.shape[2]
     device = pc.device
     cls = torch.zeros(num_points, dtype=torch.bool, device=device)
+    ignorar = torch.zeros(num_points, dtype=torch.bool, device=device)
 
     if not labels:
-        return cls
+        return (cls, ignorar) if devolver_ignorar else cls
 
     # Open3D necesita los puntos en CPU como [N, 3].
     pts_np = pc[0].detach().cpu().numpy().T
@@ -104,13 +121,21 @@ def moving_point_labels(labels, pc, transforms, margen=0.0):
             transforms, "radar", margen=margen,
         )
         inside = box.get_point_indices_within_bounding_box(cloud_pts)
-        if len(inside) > 0:
+        if len(inside) == 0:
+            continue
+        if 0 < len(inside) < min_puntos:
+            ignorar[inside] = True          # muy pocos puntos: ni sí ni no
+        else:
             cls[inside] = True
 
-    return cls
+    # Un punto que también pertenece a un objeto bien poblado sí cuenta como móvil.
+    ignorar &= ~cls
+
+    return (cls, ignorar) if devolver_ignorar else cls
 
 
-def moving_point_labels_batch(labels_batch, pc_batch, transforms_batch, margen=0.0):
+def moving_point_labels_batch(labels_batch, pc_batch, transforms_batch, margen=0.0,
+                              min_puntos=0, devolver_ignorar=False):
     """Versión por batch de `moving_point_labels`.
 
     Args:
@@ -118,14 +143,22 @@ def moving_point_labels_batch(labels_batch, pc_batch, transforms_batch, margen=0
         pc_batch: tensor [B, 3, N] con los puntos de cada frame.
         transforms_batch: lista de `FrameTransformMatrix`, uno por elemento.
         margen: metros extra a cada lado de la caja (ver `get_bbx_param`).
+        min_puntos: umbral para la máscara de ignorar (ver `moving_point_labels`).
+        devolver_ignorar: si es True devuelve también la máscara de ignorar.
 
     Returns:
-        cls_batch: tensor [B, N] (bool) con la etiqueta por punto de cada frame.
+        cls_batch: tensor [B, N] (bool) con la etiqueta por punto de cada frame,
+        y opcionalmente ignorar_batch [B, N].
     """
     batch_size = pc_batch.shape[0]
-    out = []
+    cls_out, ign_out = [], []
     for b in range(batch_size):
-        cls = moving_point_labels(labels_batch[b], pc_batch[b:b + 1],
-                                  transforms_batch[b], margen=margen)
-        out.append(cls)
-    return torch.stack(out, dim=0)                          # [B, N]
+        r = moving_point_labels(labels_batch[b], pc_batch[b:b + 1],
+                                transforms_batch[b], margen=margen,
+                                min_puntos=min_puntos, devolver_ignorar=True)
+        cls_out.append(r[0])
+        ign_out.append(r[1])
+    cls_batch = torch.stack(cls_out, dim=0)                 # [B, N]
+    if devolver_ignorar:
+        return cls_batch, torch.stack(ign_out, dim=0)
+    return cls_batch

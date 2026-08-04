@@ -197,3 +197,82 @@ class LocalGlobalFusionSimple(nn.Module):
         l0_points = self.fp1(l0_xyz, l1_xyz, None, l1_points)
 
         return l3_xyz, l0_points                        # l0_points: [B, 128, N]
+
+
+class LocalGlobalFusionWide(nn.Module):
+    """Versión de ALTA CAPACIDAD de `LocalGlobalFusionSimple`.
+
+    Motivación: el extractor original tiene solo ~0.74M parámetros (anchos 16/32/
+    64) y su salida es de 128 canales. Medido, la red subajusta los casos
+    difíciles (objetos de bajo Doppler, donde la señal es sutil). Con las A100 de
+    40 GB sobra memoria para un modelo mucho más grande.
+
+    Dos cambios respecto al simple:
+      1. Los MLP internos se duplican (32/64/128 y hasta 256 en sa3).
+      2. La SALIDA final pasa de 128 a **256 canales** (`out_dim`).
+
+    `SegmentationNet` lee `out_dim` y escala en consecuencia el correlador
+    temporal (`in_channel = 2*out_dim*2 + 3`) y la cabeza (`4*out_dim` con rama
+    temporal). Con out_dim=256 eso multiplica ~4x los parámetros de la cabeza y
+    el correlador, que es donde estaba la mayor parte de la capacidad.
+    """
+
+    def __init__(self, sample_point_num, in_channels):
+        super().__init__()
+        self.sample_point_num = sample_point_num
+        self.out_dim = 256                                  # segnet lo usa para escalar
+
+        # Anchos al doble que el extractor simple.
+        self.sa1 = PointnetSAModuleMSG(
+            npoint=sample_point_num,
+            radii=[2, 4],
+            nsamples=[4, 8],
+            mlps=[[3 + in_channels, 32, 32, 64], [3 + in_channels, 32, 32, 64]],
+        )                                                   # -> 64+64 = 128
+        self.sa2 = PointnetSAModuleMSG(
+            npoint=sample_point_num,
+            radii=[4, 8],
+            nsamples=[8, 16],
+            mlps=[[3 + 64, 64, 64], [3 + 64, 64, 128]],
+        )                                                   # -> 64+128 = 192
+        self.sa3 = PointnetSAModuleMSG(
+            npoint=sample_point_num,
+            radii=[8, 16],
+            nsamples=[16, 32],
+            mlps=[[3 + 128, 128, 128], [3 + 128, 128, 128]],
+        )                                                   # -> 128+128 = 256
+
+        self.global_stats = GlobalStatisticsModule()
+        self.fusion_conv = nn.Conv1d(128 + 5, 128, 1)       # l3 (128) + 5 stats -> 128
+
+        # Los FP terminan en 256 (la salida ancha). La dimensión de ENTRADA de
+        # cada uno depende de los canales concatenados del nivel de arriba.
+        self.fp3 = PointnetFPModule(mlp=[256, 256])         # l2(128) + l3_fused(128) = 256
+        self.fp2 = PointnetFPModule(mlp=[320, 256])         # l1(64)  + fp3(256)      = 320
+        self.fp1 = PointnetFPModule(mlp=[256, 256])         # None    + fp2(256)      = 256
+
+        self.linear1 = nn.Linear(128, 64)                   # sa1 128 -> 64
+        self.linear2 = nn.Linear(192, 128)                  # sa2 192 -> 128
+        self.linear3 = nn.Linear(256, 128)                  # sa3 256 -> 128
+
+    def forward(self, pc, features):
+        # pc: [B, N, 3]  |  features: [B, N, C]
+        l0_xyz = pc.contiguous()
+        l0_points = features.transpose(1, 2).contiguous()
+
+        l1_xyz, l1_points = self.sa1(l0_xyz, l0_points)
+        l1_points = self.linear1(l1_points.permute(0, 2, 1)).permute(0, 2, 1).contiguous()
+        l2_xyz, l2_points = self.sa2(l1_xyz, l1_points)
+        l2_points = self.linear2(l2_points.permute(0, 2, 1)).permute(0, 2, 1).contiguous()
+        l3_xyz, l3_points = self.sa3(l2_xyz, l2_points)
+        l3_points = self.linear3(l3_points.permute(0, 2, 1)).permute(0, 2, 1).contiguous()
+
+        global_stats = self.global_stats(l3_points)            # [B, 5, N3]
+        l3_fused = torch.cat([l3_points, global_stats], dim=1)  # [B, 133, N3]
+        l3_fused = self.fusion_conv(l3_fused)                   # [B, 128, N3]
+
+        l2_points = self.fp3(l2_xyz, l3_xyz, l2_points, l3_fused)
+        l1_points = self.fp2(l1_xyz, l2_xyz, l1_points, l2_points)
+        l0_points = self.fp1(l0_xyz, l1_xyz, None, l1_points)
+
+        return l3_xyz, l0_points                        # l0_points: [B, 256, N]
