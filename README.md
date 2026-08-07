@@ -183,7 +183,7 @@ Performance comparison on the View of Delft dataset:
 | **LocalGlobalFusion (Ours)** | **76.50** | **34.03** | **69.45** | **119** | — | — | **65.00** |
 | VoxelPointFusion | 70.34 | 30.70 | 64.00 | 320 | — | — | 53.30 |
 
-> ⚠️ **Do not read the IDSW column as a ranking.** The four baseline rows above
+> **Do not read the IDSW column as a ranking.** The four baseline rows above
 > show 20–149 switches against RaTrack's 404, which does **not** mean they
 > preserve identity better — a switch can only be recorded for an object the
 > tracker actually re-acquires, and those baselines recover roughly half the

@@ -34,7 +34,7 @@ For comparison, measured identically in [`../ratrack/`](../ratrack/):
 | AB3DMOT | **perfect (GT)** | 95 | 31% |
 | RaTrack | real (its own) | 404 | 86% |
 
-> ⚠️ **Protocol mismatch — do not put these two straight into a paper table.**
+> **Protocol mismatch — do not put these two straight into a paper table.**
 > Both numbers above score *every* moving GT object. RaTrack's published
 > evaluation instead discards objects with fewer than 5 radar points, and under
 > that rule its IDSW is **133**, not 404 (see [`../ratrack/`](../ratrack/), where
