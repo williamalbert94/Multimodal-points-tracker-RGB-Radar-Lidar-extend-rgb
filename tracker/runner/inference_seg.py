@@ -99,7 +99,8 @@ def _a_tensor(arr, idx, cols, device):
 
 def predecir_frame(net, puntos, feats, num_points, in_channels, device="cuda",
                    puntos_prev=None, feats_prev=None, puntos_comp=None,
-                   puntos_ref2=None, feats_ref2=None, puntos_comp2=None):
+                   puntos_ref2=None, feats_ref2=None, puntos_comp2=None,
+                   devolver_feats=False):
     """Devuelve la probabilidad de "móvil" para cada punto ORIGINAL de la nube.
 
     Repite los puntos de forma determinística hasta `num_points`, corre la red y
@@ -113,9 +114,12 @@ def predecir_frame(net, puntos, feats, num_points, in_channels, device="cuda",
         in_channels: cuántos canales de atributos usa la red.
         puntos_prev / feats_prev: frame anterior (solo si la red usa rama temporal).
         puntos_comp: frame actual compensado por ego-movimiento.
+        devolver_feats: si True, devuelve también las features por-punto del
+            backbone (F,) promediadas por punto original -> para embeddings Re-ID.
 
     Returns:
-        (N,) probabilidades por punto original.
+        (N,) probabilidades por punto original; o (prob (N,), feats (N, F)) si
+        devolver_feats=True.
     """
     n = len(puntos)
     # Índices que cubren todos los puntos al menos una vez.
@@ -145,10 +149,10 @@ def predecir_frame(net, puntos, feats, num_points, in_channels, device="cuda",
 
     with torch.no_grad():
         if getattr(net, "use_multiframe", False):
-            seg, _ = net(pc, ft, pc2, ft2, pc_comp,
-                         pc3=pc3, feature3=ft3, pc1_comp2=pc_comp2)   # [1, 1, P]
+            seg, feat_pp = net(pc, ft, pc2, ft2, pc_comp,
+                               pc3=pc3, feature3=ft3, pc1_comp2=pc_comp2)   # [1,1,P],[1,F,P]
         else:
-            seg, _ = net(pc, ft, pc2, ft2, pc_comp)          # [1, 1, P]
+            seg, feat_pp = net(pc, ft, pc2, ft2, pc_comp)    # [1,1,P], [1,F,P]
     prob_muestreada = seg.squeeze().cpu().numpy()        # (P,)
 
     # Promediamos las copias: cada punto original recibe la media de sus repeticiones.
@@ -156,7 +160,18 @@ def predecir_frame(net, puntos, feats, num_points, in_channels, device="cuda",
     cuenta = np.zeros(n, dtype=np.float64)
     np.add.at(suma, idx, prob_muestreada)
     np.add.at(cuenta, idx, 1.0)
-    return (suma / np.maximum(cuenta, 1.0)).astype(np.float32)
+    prob = (suma / np.maximum(cuenta, 1.0)).astype(np.float32)
+
+    if not devolver_feats:
+        return prob
+
+    # Features por-punto promediadas por punto original -> (N, F).
+    fpp = feat_pp.squeeze(0).permute(1, 0).cpu().numpy()     # (P, F)
+    F = fpp.shape[1]
+    suma_f = np.zeros((n, F), dtype=np.float64)
+    np.add.at(suma_f, idx, fpp)
+    feats_orig = (suma_f / np.maximum(cuenta[:, None], 1.0)).astype(np.float32)
+    return prob, feats_orig
 
 
 def escribir_txt(ruta, clusters, puntos, prob):
