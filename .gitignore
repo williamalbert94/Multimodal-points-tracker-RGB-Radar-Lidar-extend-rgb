@@ -13,6 +13,14 @@ tracker/logs/
 **/vis/
 **/vis_bev/
 
+# Borradores de la tesis y copias sueltas del docker en la raíz
+# (las versiones buenas del docker están en docker/)
+/Dockerfile
+/docker-compose.yml
+docs/_figs_calib.py
+docs/calibracion_*
+docs/figs/
+
 # Tracking de experimentos y entornos
 mlruns/
 mira/
