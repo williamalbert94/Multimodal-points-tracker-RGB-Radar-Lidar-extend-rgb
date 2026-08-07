@@ -240,7 +240,7 @@ def run_train_seg(args, logger, train_loader, val_loader, mlflow_logger=None):
                 sin_mejorar = 0
                 ckpt_path = os.path.join(checkpoint_dir, "best_miou_model.pth")
                 _save_checkpoint(net, ckpt_path, epoch, best_miou)
-                logger.info(f"🏆 Nuevo mejor mIoU={best_miou:.4f} -> guardado en {ckpt_path}")
+                logger.info(f"Nuevo mejor mIoU={best_miou:.4f} -> guardado en {ckpt_path}")
                 if mlflow_logger:
                     mlflow_logger.log_metrics({"best_miou": best_miou}, step=epoch)
                     mlflow_logger.log_artifact(ckpt_path)
@@ -251,7 +251,7 @@ def run_train_seg(args, logger, train_loader, val_loader, mlflow_logger=None):
             scheduler.step(val_metrics["miou"])
 
             if paciencia and sin_mejorar >= paciencia:
-                logger.info(f"\n⏹  Early stopping: {sin_mejorar} validaciones seguidas "
+                logger.info(f"\nEarly stopping: {sin_mejorar} validaciones seguidas "
                             f"sin superar mIoU={best_miou:.4f}. Se corta en la época {epoch + 1}.")
                 break
 

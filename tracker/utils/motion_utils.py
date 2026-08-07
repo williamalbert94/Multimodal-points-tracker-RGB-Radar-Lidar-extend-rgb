@@ -106,7 +106,7 @@ def compute_box_motion_features(lbl1, lbl2, dt=0.1):
         valid = speed < MAX_SPEED
 
         if not valid:
-            logger.warning(f"⚠️ Track {track_id}: Unrealistic speed {speed:.2f} m/s (>{MAX_SPEED} m/s)")
+            logger.warning(f"Track {track_id}: Unrealistic speed {speed:.2f} m/s (>{MAX_SPEED} m/s)")
 
         motion_dict[track_id] = {
             'displacement': displacement,
