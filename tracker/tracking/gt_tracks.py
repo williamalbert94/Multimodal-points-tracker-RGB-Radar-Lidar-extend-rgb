@@ -6,8 +6,10 @@ un archivo por frame. Cada línea es una caja KITTI (frame cámara) con un
 
     type obj_id truncated alpha  x1 y1 x2 y2  h w l  x y z  ry  moving
 
-Solo contiene objetos MÓVILES (la última columna, moving, es siempre 1), que es
-justo lo que sigue el resto del pipeline.
+La última columna de este archivo vale 1 en todas las filas, de modo que NO
+distingue objetos móviles de estáticos. La bandera real de movimiento vive en la
+columna 2 de `label_2` (detección), que VoD entrega alineado fila a fila con el
+de tracking. El filtro correspondiente se activa con `moving_only=True`.
 
 La conversión cámara -> radar usa exactamente la misma convención que
 `gt_labels.get_bbx_param` (centro por `t_radar_camera`, rotación por
@@ -78,17 +80,22 @@ class GtTrackLoader:
     IMG_W, IMG_H = 1936, 1216       # tamaño de la imagen VoD (para el filtro FOV)
 
     def __init__(self, dataset_path, keep_types=None, min_radar_points=0,
-                 fov_only=False):
+                 fov_only=False, moving_only=False):
         """`keep_types`: conjunto de tipos a conservar (None = todos los móviles).
         `min_radar_points`: si >0, solo conserva cajas GT con ≥ ese nº de puntos
         de RADAR dentro (protocolo de RaTrack: objetos móviles con ≥5 puntos).
         `fov_only`: si True, solo conserva cajas cuyo CENTRO cae dentro del FOV de
         la cámara (adelante y dentro de la imagen). El pipeline es forward-facing
-        (RGB+radar), así que los objetos fuera del FOV son inevaluables."""
+        (RGB+radar), así que los objetos fuera del FOV son inevaluables.
+        `moving_only`: si True, conserva solo objetos en MOVIMIENTO, replicando el
+        `filter_moving_boxes_det` de RaTrack. La bandera de movimiento NO está en
+        `label_2_tracking` (su última columna es constante 1), sino en la columna 2
+        de `label_2`, que VoD entrega alineado fila a fila con el de tracking."""
         self.dataset_path = dataset_path
         self.keep_types = set(keep_types) if keep_types else None
         self.min_radar_points = int(min_radar_points)
         self.fov_only = bool(fov_only)
+        self.moving_only = bool(moving_only)
         self.loc = VodTrackLocations(root_dir=dataset_path, output_dir=dataset_path,
                                      frame_set_path="", pred_dir="")
         self._tf_cache = {}
@@ -125,14 +132,32 @@ class GtTrackLoader:
             transforms = FrameTransformMatrix(fd)
             self._tf_cache[fs] = transforms
             with open(label_file) as f:
-                lines = f.readlines()
+                lines = [ln for ln in f if ln.strip()]
         except Exception:
             return empty
 
+        # Banderas de movimiento (columna 2 de label_2, alineado fila a fila con
+        # label_2_tracking). Si el alineamiento no se cumple no se filtra nada,
+        # para no descartar objetos por un desajuste de formato.
+        mov_flags = None
+        if self.moving_only:
+            det_file = os.path.join(os.path.dirname(self.loc.tracking_label_dir),
+                                    "label_2", f"{fs}.txt")
+            try:
+                with open(det_file) as f:
+                    det_lines = [ln.split() for ln in f if ln.strip()]
+                if len(det_lines) == len(lines):
+                    mov_flags = [int(float(d[1])) if len(d) > 1 else 1
+                                 for d in det_lines]
+            except Exception:
+                mov_flags = None
+
         boxes, ids, types = [], [], []
-        for line in lines:
+        for i, line in enumerate(lines):
             lab = parse_tracking_label_line(line)
             if lab is None:
+                continue
+            if mov_flags is not None and mov_flags[i] != 1:
                 continue
             # Descarta clases no-móviles/inválidas (DontCare, bicycle_rack,
             # ride_uncertain) y cajas DEGENERADAS: KITTI mete placeholders de

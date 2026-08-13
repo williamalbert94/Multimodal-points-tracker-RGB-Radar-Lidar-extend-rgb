@@ -49,6 +49,8 @@ def main():
     ap.add_argument("--clips", nargs="+", default=VAL_CLIPS)
     ap.add_argument("--cada", type=int, default=1, help="guardar figura cada N frames")
     ap.add_argument("--gt-min-radar-points", type=int, default=0)
+    ap.add_argument("--gt-moving-only", action="store_true",
+                    help="protocolo RaTrack: solo objetos GT en movimiento")
     ap.add_argument("--fov-only", action="store_true",
                     help="excluye GT y detecciones fuera del FOV de la cámara")
     ap.add_argument("--max-age", type=int, default=10)
@@ -57,7 +59,7 @@ def main():
 
     dets = pickle.load(open(args.detections, "rb"))
     gl = GtTrackLoader(args.dataset, min_radar_points=args.gt_min_radar_points,
-                       fov_only=args.fov_only)
+                       fov_only=args.fov_only, moving_only=args.gt_moving_only)
     loc = VodTrackLocations(root_dir=args.dataset, output_dir=args.dataset,
                             frame_set_path="", pred_dir="")
 
@@ -135,6 +137,7 @@ def main():
     m = acc.compute_metrics()
     os.makedirs(args.out, exist_ok=True)
     filtro = (f"GT-box + segmentación (móvil)"
+              + (" + solo objetos en movimiento" if args.gt_moving_only else "")
               + (f" + ≥{args.gt_min_radar_points} pts radar" if args.gt_min_radar_points else ""))
     apar = "con apariencia (ReID)" if args.reid_head else "sin apariencia (movimiento)"
     lineas = [

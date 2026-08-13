@@ -55,6 +55,8 @@ def main():
     ap.add_argument("--min-radar-pts", type=int, default=0,
                     help="además, exige ≥N puntos de RADAR en la caja (universo "
                          "RaTrack: objetos observables). 0 = sin este filtro")
+    ap.add_argument("--moving-only", action="store_true",
+                    help="protocolo RaTrack: solo objetos GT en movimiento")
     ap.add_argument("--margen", type=float, default=0.25,
                     help="margen de la caja para el test de contención (radar impreciso)")
     ap.add_argument("--split", choices=["train", "val"], default="val",
@@ -78,7 +80,7 @@ def main():
     ds = TrackingDataVOD(cfg, cfg.dataset_path)
     total = len(ds) if args.limit <= 0 else min(args.limit, len(ds))
     in_ch = int(getattr(cfg, "in_channels", 2))
-    gl = GtTrackLoader(cfg.dataset_path)
+    gl = GtTrackLoader(cfg.dataset_path, moving_only=args.moving_only)
 
     dets = {}
     n_keep = n_gt = 0

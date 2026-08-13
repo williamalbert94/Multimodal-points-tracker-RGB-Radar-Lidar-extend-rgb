@@ -180,8 +180,34 @@ Performance comparison on the View of Delft dataset:
 | AB3DMOT | 51.23 | 15.00 | 46.72 | -- | 20.59 | 39.71 | evals only tracker |
 | AB3DMOT-PP *(PointPillars det.)* | 60.71 | 21.51 | 49.38 | 313 ‡ | 26.47 | 33.82 | n/a |
 | RaTrack | 74.16 | 31.50 | 67.27 | 404 | 42.65 | 14.71 | 57.00 |
-| **LocalGlobalFusion (Ours)** | **76.50** | **34.03** | **69.45** | **119** | — | — | **65.00** |
+| **LocalGlobalFusion (Ours)** § | **99.67** | n/a § | **78.44** | **9** | **58.5** | **12.3** | **74.66** |
 | VoxelPointFusion | 70.34 | 30.70 | 64.00 | 320 | — | — | 53.30 |
+
+§ **Read the protocol before quoting this row.** Measured on the VoD validation
+split (`delft_1/10/14/22`, 1288 frames) with the moving-object filter enabled,
+which gives `n_gt = 3474` against RaTrack's 3116 — close but not identical, since
+RaTrack drops only `DontCare` while we additionally exclude `Pedestrian`,
+`bicycle_rack` and `ride_uncertain`. Two caveats that work in our favour and must
+be carried with the numbers:
+
+* **Detections are GT boxes filtered by segmentation**, not a detector's output,
+  so `FP = 0` by construction. That inflates MOTA (78.44, MODA 78.70) and sAMOTA
+  (which measures precision and identity, and is blind to recall — see
+  [`examples/ratrack/`](./examples/ratrack/)). The detection side is therefore an
+  upper bound, not a like-for-like result. What *is* comparable is the identity
+  column: **9 switches against RaTrack's 329–367 at near-identical MODA
+  (78.70 vs 77.83)**, i.e. 0.33 vs 13.57 switches per 100 tracked objects.
+* **AMOTA is not reported** because our detections carry no calibrated
+  confidence (the "score" is a radar point count), so AB3DMOT's recall sweep is
+  meaningless here. The value our accumulator prints simply repeats MOTA.
+
+The mIoU cell is the **frame-weighted** mean that replicates RaTrack's
+`eval_motion_seg`, which is the only convention comparable to their published
+57.0. The micro-averaged mIoU over the same predictions is 77.67 and must not be
+quoted against RaTrack; per-class it decomposes into IoU_moving 57.88 and
+IoU_static 97.47. Reproduce with
+`tracker/runner/inference_seg.py` (both conventions are printed) and
+`tracker/tracking/track_inference.py --gt-moving-only`.
 
 > **Do not read the IDSW column as a ranking.** The four baseline rows above
 > show 20–149 switches against RaTrack's 404, which does **not** mean they
@@ -252,6 +278,7 @@ RaTrack's own Table I (n_gt = 3116 valid moving instances):
 | AB3DMOT | 46.72 | 47.38 | 21 | 1476 | 1.39 | 20.59 | 39.71 |
 | AB3DMOT-PP | 49.38 | 49.86 | 15 | 1554 | **0.96** | 26.47 | 33.82 |
 | **RaTrack** | 67.27 | 77.83 | 329 | 2425 | **13.57** | 42.65 | 14.71 |
+| **Ours** (moving-only, n_gt = 3474) § | 78.44 | 78.70 | 9 | 2734 | **0.33** | 58.5 | 12.3 |
 
 Normalised, the picture is coherent rather than anomalous: every box-based
 tracker sits at 1–2 switches per 100 tracked objects, CenterPoint's
@@ -299,9 +326,13 @@ Note finally that IDSW, MOTA and MODA all conflate detection with association by
 construction; IDF1 and HOTA's AssA component are designed to isolate association
 quality and are worth reporting alongside.
 
-For the same reason, **IDSW must always be read together with MT/ML**. The MT/ML
-columns for our method still need to be filled in before this table can argue
-that 84 reflects genuine identity preservation rather than reduced coverage.
+For the same reason, **IDSW must always be read together with MT/ML**. Our own
+row now carries them: MT 58.5 / ML 12.3 against RaTrack's 42.65 / 14.71, at
+MODA 78.70 vs 77.83. Coverage is therefore comparable or better, which is what
+licenses reading the 9 switches as identity preservation rather than as an
+artefact of tracking fewer objects. The caveat of §Results still applies — our
+detections are GT boxes filtered by segmentation, so the *detection* side of
+that comparison is an upper bound.
 
 † RaTrack publishes no IDSW. Recovered by re-evaluating its released per-frame
 predictions on the VoD validation split under RaTrack's own protocol: moving

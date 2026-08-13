@@ -17,6 +17,16 @@ repetimos la nube de forma determinística hasta llenar `num_points` (todos los
 puntos entran al menos una vez) y después promediamos la probabilidad de las
 copias de cada punto. Las métricas quedan calculadas sobre los puntos originales.
 
+Sobre `--clases`
+----------------
+Por defecto se evalúa contra TODOS los objetos móviles. Con `--clases Car` el GT
+positivo queda solo con los autos y los puntos que caen en objetos móviles de
+otras clases (peatón, ciclista, ...) pasan a una máscara de "ignorar": no cuentan
+ni como acierto ni como error. Es lo correcto, porque el modelo es binario
+móvil/estático y no tiene forma de saber la clase: castigarlo por acertar un
+peatón móvil sería medir otra cosa. Con `--otras-como-estatico` se puede forzar
+el criterio estricto (todo lo que no es auto cuenta como estático).
+
 Uso:
     python -m tracker.runner.inference_seg \
         --config tracker/config/seg_exp_A_vrcomp.yaml \
@@ -46,18 +56,26 @@ EPS = 1e-20
 # Métricas sobre los puntos originales
 # ─────────────────────────────────────────────────────────────────────────────
 
-def contar(pred, gt):
+def contar(pred, gt, ignorar=None):
     """Cuenta aciertos y errores de un frame: (TP, FP, FN, TN).
 
     Versión en numpy de `tracker.metrics.contar_confusion` (que trabaja con
     tensores). Las métricas se arman con la misma función compartida, así el
     número de la inferencia es directamente comparable con el del entrenamiento.
+
+    Args:
+        pred: (N,) bool con la predicción binarizada.
+        gt:   (N,) bool con la etiqueta.
+        ignorar: (N,) bool opcional; esos puntos no se cuentan en ningún casillero.
     """
+    if ignorar is not None:
+        valido = ~ignorar
+        pred, gt = pred[valido], gt[valido]
     return (float(np.sum(pred & gt)), float(np.sum(pred & ~gt)),
             float(np.sum(~pred & gt)), float(np.sum(~pred & ~gt)))
 
 
-def barrer_umbral(probs, gts, umbrales=None):
+def barrer_umbral(probs, gts, ignorados=None, umbrales=None):
     """Busca el umbral que maximiza el IoU de la clase móvil.
 
     Con tanto desbalance, el 0.5 por defecto casi nunca es el mejor corte: la red
@@ -67,6 +85,7 @@ def barrer_umbral(probs, gts, umbrales=None):
     Args:
         probs: lista de arrays (N,) con las probabilidades por frame.
         gts:   lista de arrays (N,) bool con el GT por frame.
+        ignorados: lista de arrays (N,) bool con los puntos a no contar, o None.
 
     Returns:
         (mejor_umbral, mejores_metricas, tabla) donde tabla es la lista de
@@ -74,12 +93,14 @@ def barrer_umbral(probs, gts, umbrales=None):
     """
     if umbrales is None:
         umbrales = np.arange(0.05, 0.96, 0.05)
+    if ignorados is None:
+        ignorados = [None] * len(probs)
 
     tabla, mejor, mejor_u, mejor_m = [], -1.0, 0.5, {}
     for u in umbrales:
         tp = fp = fn = tn = 0.0
-        for p, g in zip(probs, gts):
-            a, b, c, d = contar(p > u, g)
+        for p, g, ign in zip(probs, gts, ignorados):
+            a, b, c, d = contar(p > u, g, ign)
             tp += a; fp += b; fn += c; tn += d
         m = metricas_de_conteos(tp, fp, fn, tn)
         tabla.append((float(u), m["iou_moving"]))
@@ -174,6 +195,23 @@ def predecir_frame(net, puntos, feats, num_points, in_channels, device="cuda",
     return prob, feats_orig
 
 
+def separar_por_clase(labels, clases):
+    """Parte las cajas móviles del frame en (las de interés, las demás).
+
+    Args:
+        labels: dict {id: Object_3D} con los objetos móviles del frame.
+        clases: conjunto de tipos a conservar (p. ej. {"Car"}), o None.
+
+    Returns:
+        (labels_interes, labels_otras); si `clases` es None, (labels, {}).
+    """
+    if not clases:
+        return labels, {}
+    interes = {k: v for k, v in labels.items() if v.type in clases}
+    otras = {k: v for k, v in labels.items() if v.type not in clases}
+    return interes, otras
+
+
 def escribir_txt(ruta, clusters, puntos, prob):
     """Guarda los objetos móviles con el mismo formato que usa RaTrack.
 
@@ -206,6 +244,13 @@ def main():
     parser.add_argument("--sin-postproc", action="store_true", help="Apaga el post-procesamiento.")
     parser.add_argument("--fijar-umbral", action="store_true",
                         help="Usa el --umbral dado en vez del mejor del barrido.")
+    parser.add_argument("--clases", nargs="+", default=None, metavar="TIPO",
+                        help="Tipos de objeto a evaluar (p. ej. --clases Car). "
+                             "Por defecto: todos los móviles.")
+    parser.add_argument("--otras-como-estatico", action="store_true",
+                        help="Con --clases: cuenta los móviles de otras clases como "
+                             "estáticos en vez de ignorarlos.")
+    parser.add_argument("--sufijo", default="", help="Sufijo para la carpeta de salida.")
     args_cli = parser.parse_args()
 
     cfg = load_config(args_cli.config)
@@ -213,10 +258,16 @@ def main():
     cfg.eval = True                                      # split de validación
     cfg.aug = False                                      # nunca aumentar en inferencia
 
-    exp = getattr(cfg, "exp_name", "seg")
+    exp = getattr(cfg, "exp_name", "seg") + args_cli.sufijo
     dir_vis = os.path.join(args_cli.output, exp, "vis")
     dir_vis_bev = os.path.join(args_cli.output, exp, "vis_bev")
     dir_data = os.path.join(args_cli.output, exp, "data")
+
+    clases = set(args_cli.clases) if args_cli.clases else None
+    if clases:
+        modo = "estáticos" if args_cli.otras_como_estatico else "ignorados"
+        print(f"[inferencia] evaluando SOLO las clases {sorted(clases)}; "
+              f"los móviles de otras clases quedan {modo}.")
 
     # ── Modelo ───────────────────────────────────────────────────────────────
     net = build_model(cfg)
@@ -254,8 +305,20 @@ def main():
             continue
 
         pc_t = torch.from_numpy(puntos[:, :3]).float().T.unsqueeze(0)
-        gt = moving_point_labels(lbl1, pc_t, transforms,
-                                 margen=float(getattr(cfg, "gt_box_margin", 0.0))).numpy().astype(bool)
+        margen = float(getattr(cfg, "gt_box_margin", 0.0))
+
+        lbl_interes, lbl_otras = separar_por_clase(lbl1, clases)
+        gt = moving_point_labels(lbl_interes, pc_t, transforms,
+                                 margen=margen).numpy().astype(bool)
+        # Los móviles de otras clases no se pueden premiar ni castigar: el modelo
+        # es binario y no distingue clases (salvo que se pida el criterio estricto).
+        if lbl_otras and not args_cli.otras_como_estatico:
+            ign = moving_point_labels(lbl_otras, pc_t, transforms,
+                                      margen=margen).numpy().astype(bool)
+            ign &= ~gt                       # si además es auto, manda el auto
+        else:
+            ign = np.zeros(len(puntos), dtype=bool)
+
         prob = predecir_frame(net, puntos, feats, cfg.num_points,
                               int(getattr(cfg, "in_channels", 2)),
                               puntos_prev=muestra[1], feats_prev=muestra[3],
@@ -263,7 +326,7 @@ def main():
                               puntos_ref2=muestra[17], feats_ref2=muestra[18],
                               puntos_comp2=muestra[19])
 
-        frames.append({"pts": puntos[:, :3], "prob": prob, "gt": gt,
+        frames.append({"pts": puntos[:, :3], "prob": prob, "gt": gt, "ign": ign,
                        "clip": clip, "nombre": f"{int(num_frame):05d}",
                        "tf": transforms})
         if len(frames) % 100 == 0:
@@ -276,6 +339,7 @@ def main():
     # ── Umbral: el 0.5 de referencia y el mejor del barrido ──────────────────
     probs = [f["prob"] for f in frames]
     gts = [f["gt"] for f in frames]
+    igns = [f["ign"] for f in frames]
 
     def globales(umbral, post=False):
         tp = fp = fn = tn = 0.0
@@ -284,14 +348,31 @@ def main():
                 pred, _, _ = postprocesar(f["pts"], f["prob"], umbral=umbral)
             else:
                 pred = f["prob"] > umbral
-            a, b, c, d = contar(pred, f["gt"])
+            a, b, c, d = contar(pred, f["gt"], f["ign"])
             tp += a; fp += b; fn += c; tn += d
         return metricas_de_conteos(tp, fp, fn, tn)
 
+    def miou_ratrack(umbral, post=False):
+        """mIoU con la convención de RaTrack (`main_utils.eval_motion_seg`): se
+        calcula la mIoU binaria de CADA frame y se promedia sobre los frames.
+        No es intercambiable con la micro-promediada de `globales`, que acumula
+        TP/FP/FN/TN de todo el split; sobre este split difieren en más de 10
+        puntos. Solo esta es comparable contra el 57.0 publicado por RaTrack."""
+        acum = 0.0
+        for f in frames:
+            if post:
+                pred, _, _ = postprocesar(f["pts"], f["prob"], umbral=umbral)
+            else:
+                pred = f["prob"] > umbral
+            tp, fp, fn, tn = (v + 1e-20 for v in contar(pred, f["gt"], f["ign"]))
+            acum += 0.5 * (tp / (tp + fp + fn + 1e-4) + tn / (tn + fp + fn + 1e-4))
+        return acum / max(len(frames), 1)
+
     m_base = globales(args_cli.umbral)
-    mejor_u, m_mejor, tabla = barrer_umbral(probs, gts)
+    mejor_u, m_mejor, tabla = barrer_umbral(probs, gts, igns)
     umbral_final = args_cli.umbral if args_cli.fijar_umbral else mejor_u
     m_post = globales(umbral_final, post=not args_cli.sin_postproc)
+    miou_rt = miou_ratrack(umbral_final, post=not args_cli.sin_postproc)
 
     # ── Pasada 2: guardar salidas con el umbral elegido ──────────────────────
     guardados = 0
@@ -305,7 +386,7 @@ def main():
                      clusters, f["pts"], prob)
 
         if n % max(args_cli.cada, 1) == 0:
-            m_frame = metricas_de_conteos(*contar(pred, f["gt"]))
+            m_frame = metricas_de_conteos(*contar(pred, f["gt"], f["ign"]))
             try:
                 imagen = FrameDataLoader(kitti_locations=kitti,
                                          frame_number=f["nombre"]).image
@@ -319,16 +400,37 @@ def main():
             guardados += 1
 
     # ── Resumen ──────────────────────────────────────────────────────────────
+    n_pts = sum(len(f["gt"]) for f in frames)
+    n_gt = sum(int(f["gt"].sum()) for f in frames)
+    n_ign = sum(int(f["ign"].sum()) for f in frames)
+
     resumen = [
         "=" * 74,
         f"RESULTADOS DE INFERENCIA — {exp}   ({len(frames)} frames)",
         "Métricas micro-promediadas: se acumulan TP/FP/FN/TN de todo el split.",
+    ]
+    if clases:
+        modo = "como estáticos" if args_cli.otras_como_estatico else "ignorados"
+        resumen += [
+            f"Clases evaluadas    : {', '.join(sorted(clases))}   "
+            f"(móviles de otras clases: {modo})",
+            f"puntos: {n_pts} totales | {n_gt} móviles de la clase "
+            f"({100.0 * n_gt / max(n_pts, 1):.2f}%) | {n_ign} ignorados "
+            f"({100.0 * n_ign / max(n_pts, 1):.2f}%)",
+        ]
+    resumen += [
         "=" * 74,
         f"{'métrica':<14}{f'umbral {args_cli.umbral:.2f}':>18}"
         f"{f'umbral {umbral_final:.2f}':>18}{'+ post-proc':>18}",
     ]
     for k in ("miou", "iou_moving", "iou_static", "f1", "sen", "acc"):
         resumen.append(f"{k:<14}{m_base[k]:>18.4f}{m_mejor[k]:>18.4f}{m_post[k]:>18.4f}")
+    resumen += [
+        "=" * 74,
+        f"mIoU con la convención de RaTrack (promedio POR FRAME): {miou_rt:.4f}",
+        "Es la única comparable contra el 57.0 que publica RaTrack. La mIoU de la",
+        "tabla de arriba es micro-promediada y NO es intercambiable con aquella.",
+    ]
     resumen += [
         "=" * 74,
         "Barrido de umbral (IoU móvil):",
