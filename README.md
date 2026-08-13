@@ -19,10 +19,12 @@
 - [Prerequisites](#prerequisites)
 - [Dataset](#dataset)
 - [Environment Setup](#environment-setup)
+  - [Pre-trained weights](#pre-trained-weights)
 - [Method](#method)
 - [🚀 Getting Started](#-getting-started)
   - [Phase 1: Backbone Pre-training](#phase-1-backbone-pre-training)
-  - [Phase 2: Tracking Model](#phase-2-tracking-model)
+  - [Phase 1: Inference and Evaluation](#phase-1-inference-and-evaluation)
+  - [Phase 2: Detections, Re-ID and Tracking](#phase-2-detections-re-id-and-tracking)
 - [Evaluation](#evaluation)
 - [Results](#results)
 - [References](#references)
@@ -86,12 +88,55 @@ view_of_delft_PUBLIC/
 
 ## Environment Setup
 
-Build and run the Docker environment:
+Everything runs inside the container; nothing needs to be installed on the host
+beyond Docker and the NVIDIA container toolkit.
+
+**1. Point the compose file at your dataset.** `docker/docker-compose.yml` has
+the VoD path hard-coded — edit this line before building:
+
+```yaml
+volumes:
+  - /home/williamramirez/view_of_delft_PUBLIC:/project/view_of_delft_PUBLIC   # <- your path
+  - ./root:/home/${USER}
+```
+
+**2. Build and open a shell.**
 
 ```bash
+cd docker
 docker compose build
-docker compose run
+docker compose run --rm tracker_multimodal_mira
 ```
+
+The compose entrypoint is `bash`, and `~/.bashrc` activates the `mira` conda
+environment and compiles the PointNet++ CUDA ops (`external/lib/setup.py`) on
+first shell start. That compilation is GPU-architecture specific, so it happens
+in the container rather than at image build time.
+
+Inside the container the repository is at `/project` and the interpreter is
+`/opt/conda/envs/mira/bin/python`. Every command below assumes you are at
+`/project`.
+
+To run a single command without an interactive shell:
+
+```bash
+docker compose run --rm tracker_multimodal_mira -lc \
+  '/opt/conda/envs/mira/bin/python -u -m tracker.runner.train --config tracker/config/seg_exp_Q_lidarflow.yaml'
+```
+
+### Pre-trained weights
+
+Download from
+[Google Drive](https://drive.google.com/drive/folders/1ES5mvwTNd957d1wRxdbb_hcUX75J3KGs?usp=sharing)
+and place the files so the paths below resolve:
+
+```
+tracker/checkpoints/seg_exp_Q_lidarflow/best_miou_model.pth   # Phase 1 backbone (mIoU 0.7877)
+tracker/results/reid_head.pth                                 # Phase 2 Re-ID head
+```
+
+With these two files you can skip training entirely and go straight to
+[Inference](#phase-1-inference-and-evaluation) and [Evaluation](#evaluation).
 
 ### GPU Considerations
 
@@ -114,54 +159,160 @@ The architecture combines:
 
 ## 🚀 Getting Started
 
-### Phase 1: Backbone Pre-training
-
-Pre-train the backbone using the segmentation configuration:
+All commands run inside the container from `/project`. `PY` is used below as a
+shorthand for the interpreter:
 
 ```bash
-python train.py --config config/segmentation_phase1.yml
+PY=/opt/conda/envs/mira/bin/python
 ```
 
-This will:
-- Create logs in TXT format
-- Save the best model checkpoint based on mIoU or F1-score at point level
-- Optionally, use pre-trained weights (link provided in repository)
+### Phase 1: Backbone Pre-training
 
-#### Evaluation and Visualization
+Trains the moving/static point segmentation backbone (LiDAR-radar early fusion,
+temporal branch, MASG global aggregation). Everything is driven by the YAML:
 
-To evaluate the trained model on the test set:
-1. Point to the pre-trained weights in `config/segmentation_phase1.yml`
-2. Enable `plot_segmentation` to generate inference visualizations
+```bash
+$PY -u -m tracker.runner.train --config tracker/config/seg_exp_Q_lidarflow.yaml
+```
 
-**Expected output:**
+`seg_exp_Q_lidarflow.yaml` is the configuration behind the reported results:
+2048 points, `in_channels: 6`, `fusion: radar_base` with a 2.0 m radius,
+`use_temporal` plus `lidar_temporal`, 95 epochs at `lr 3e-4`. It writes the best
+checkpoint by mIoU to `tracker/checkpoints/<exp_name>/best_miou_model.pth` and
+logs to MLflow (`http://localhost:5000`, started by `docker compose up mlflow`).
+
+Other configs in `tracker/config/` are the ablation arms: `seg_exp_B_fusion`
+(fusion only), `seg_exp_C_movil`, `seg_exp_A_vrcomp`. `seg_train_smoke.yaml` is
+a short run for checking the pipeline end to end.
+
+### Phase 1: Inference and Evaluation
+
+Scores the backbone on the validation split and writes figures, per-frame
+predictions and a metrics report:
+
+```bash
+$PY -u -m tracker.runner.inference_seg \
+    --config     tracker/config/seg_exp_Q_lidarflow.yaml \
+    --checkpoint tracker/checkpoints/seg_exp_Q_lidarflow/best_miou_model.pth
+```
+
+Produces under `tracker/results/seg_exp_Q_lidarflow/`:
+
+| path | contents |
+|---|---|
+| `metrics.txt` | mIoU / IoU_moving / IoU_static / F1 / recall, plus a threshold sweep |
+| `vis/` | 3-panel figures: GT, RGB, prediction |
+| `vis_bev/` | 2-panel bird's-eye view |
+| `data/` | per-frame predictions in RaTrack's text format |
+
+Useful flags: `--cada N` writes a figure every N frames (`--cada 100000`
+effectively disables them and makes the run much faster), `--clases Car`
+restricts the evaluation to one object type, `--sin-postproc` disables cluster
+post-processing, `--sufijo` renames the output folder.
+
+`metrics.txt` reports mIoU under **two conventions**: the micro-averaged one
+(pooled TP/FP/FN over the split) and the frame-weighted one that replicates
+RaTrack's `eval_motion_seg`. Only the second is comparable to their published
+57.0 — see the caveat in [Results](#results).
 
 ![Segmentation Results](./docs/figures/repo2.png)
 
-### Phase 2: Tracking Model
+### Phase 2: Detections, Re-ID and Tracking
 
-Train the tracking model with gallery-based re-identification:
+Phase 2 runs on top of a trained Phase-1 backbone, in three steps.
+
+**Step 1 — precompute detections.** Boxes are GT boxes kept only when the
+segmentation head fires inside them, which isolates the tracking study from the
+detection bottleneck (see [Results](#results) for what this implies). You need
+the validation split for evaluation and the train split for fitting the Re-ID
+head:
 
 ```bash
-python train.py --config config/reid_phase2.yml
+CKPT=tracker/checkpoints/seg_exp_Q_lidarflow/best_miou_model.pth
+CFG=tracker/config/seg_exp_Q_lidarflow.yaml
+
+# validation, moving objects only (RaTrack's evaluation scope)
+$PY -u -m tracker.tracking.precompute_detections_gtseg \
+    --config $CFG --checkpoint $CKPT --split val --moving-only \
+    --umbral 0.5 --min-pts 1 \
+    --out tracker/results/detections_gtseg_val_mov.pkl
+
+# train split, for the Re-ID head
+$PY -u -m tracker.tracking.precompute_detections_gtseg \
+    --config $CFG --checkpoint $CKPT --split train \
+    --out tracker/results/detections_gtseg_train.pkl
 ```
 
-Enable `plot_reid` to visualize results similar to the following:
+Add `--min-radar-pts N` to additionally require N raw radar returns per box.
+
+**Step 2 — train the Re-ID head.** Triplet loss over GT track identities, on
+pooled backbone features plus box geometry:
+
+```bash
+$PY -u -m tracker.tracking.train_reid \
+    --train tracker/results/detections_gtseg_train.pkl \
+    --out   tracker/results/reid_head.pth \
+    --epochs 40 --lr 1e-3 --margin 0.3 --embedding-dim 256
+```
+
+**Step 3 — run the tracker.** The gallery tracker combines appearance, geometry,
+density, motion and spatial cues under Hungarian assignment:
+
+```bash
+# motion only
+$PY -u -m tracker.tracking.track_inference \
+    --detections tracker/results/detections_gtseg_val_mov.pkl \
+    --gt-moving-only \
+    --out tracker/results/track_mov
+
+# with the appearance cue
+$PY -u -m tracker.tracking.track_inference \
+    --detections tracker/results/detections_gtseg_val_mov.pkl \
+    --gt-moving-only --reid-head tracker/results/reid_head.pth \
+    --out tracker/results/track_mov_reid
+```
+
+Writes `metrics.txt`, `vis/` (GT | RGB | prediction with track IDs) and `data/`
+(one row per track, radar frame). `--max-age`, `--match-threshold` and
+`--cada` control track lifetime, the association threshold and figure density.
 
 ![Tracking Results](./docs/figures/image.png)
 
 *Left: Ground truth track IDs | Right: Predicted track IDs (vehicle class example)*
 
-**Note:** This phase trains with perfect boxes and segmentation. During inference, the pre-trained model from Phase 1 is used.
-
 ## Evaluation
 
-Run inference with the pre-trained segmentation model:
+`track_inference.py` already prints MOTA, IDF1, MOTP, MT/PT/ML, ID switches and
+TP/FP/FN at a single operating point. The integral metrics need the AB3DMOT
+protocol sweep, which re-runs the tracker across confidence thresholds:
 
 ```bash
-python eval.py --config config/eval_config.yaml
+$PY -u -m tracker.tracking.amota_ab3dmot \
+    --detections tracker/results/detections_gtseg_val_mov.pkl \
+    --gt-moving-only --explain
 ```
 
-Pre-trained weights for both phases are available. Simply point to them in the configuration and run the evaluation script.
+`--explain` prints the full curve (threshold, recall, TP/FP/FN, IDSW, MOTA,
+sMOTA) so the averaging is auditable rather than a single number.
+
+**Evaluation scope flags.** These decide which GT objects count, and they change
+the numbers substantially, so quote them alongside any result:
+
+| flag | effect | `n_gt` on val |
+|---|---|---:|
+| *(none)* | every annotated object, including parked ones | 11457 |
+| `--gt-moving-only` | moving objects only, RaTrack's scope | 3474 |
+| `--gt-moving-only --gt-min-radar-points 2` | also requires 2 raw radar returns | 2581 |
+| `--fov-only` | drops objects outside the camera frustum | — |
+
+The moving-object flag reads column 2 of `label_2`, which VoD ships row-aligned
+with `label_2_tracking`; the last column of the tracking file is constant 1 and
+is **not** a moving flag. Without it, parked vehicles are scored as missed
+detections and object recall drops from 79% to 23%.
+
+To re-evaluate RaTrack's own released predictions under the same protocol, see
+[`examples/ratrack/`](./examples/ratrack/), which also recovers its unpublished
+ID-switch count from the metric identities.
 
 ### Inference Demo
 
