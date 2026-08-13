@@ -314,6 +314,64 @@ To re-evaluate RaTrack's own released predictions under the same protocol, see
 [`examples/ratrack/`](./examples/ratrack/), which also recovers its unpublished
 ID-switch count from the metric identities.
 
+### Reproducing the results row
+
+The four commands below regenerate every cell of our row in
+[Results](#results), starting from the downloaded Phase-1 checkpoint. `--cada
+100000` suppresses figure rendering, which otherwise dominates the runtime.
+
+```bash
+PY=/opt/conda/envs/mira/bin/python
+CFG=tracker/config/seg_exp_Q_lidarflow.yaml
+CKPT=tracker/checkpoints/seg_exp_Q_lidarflow/best_miou_model.pth
+
+# (1) segmentation metrics  ->  mIoU
+$PY -u -m tracker.runner.inference_seg --config $CFG --checkpoint $CKPT --cada 100000
+
+# (2) detections for the tracking study
+$PY -u -m tracker.tracking.precompute_detections_gtseg \
+    --config $CFG --checkpoint $CKPT --split val --moving-only \
+    --umbral 0.5 --min-pts 1 \
+    --out tracker/results/detections_gtseg_val_mov.pkl
+
+# (3) tracker  ->  MOTA, IDSW, MT, ML
+$PY -u -m tracker.tracking.track_inference \
+    --detections tracker/results/detections_gtseg_val_mov.pkl \
+    --gt-moving-only --cada 100000 --out tracker/results/track_mov
+
+# (4) AB3DMOT sweep  ->  sAMOTA, AMOTA
+$PY -u -m tracker.tracking.amota_ab3dmot \
+    --detections tracker/results/detections_gtseg_val_mov.pkl --gt-moving-only
+```
+
+Where each number comes from:
+
+| cell | value | command | where to read it |
+|---|---:|:---:|---|
+| mIoU | 74.66 | (1) | `seg_exp_Q_lidarflow/metrics.txt`, the line *"mIoU con la convención de RaTrack"* |
+| MOTA | 78.44 | (3) | `track_mov/metrics.txt`, `MOTA` |
+| IDSW | 9 | (3) | `track_mov/metrics.txt`, `ID-switches` |
+| MT / ML | 58.5 / 12.3 | (3) | `track_mov/metrics.txt`, `MT/PT/ML` |
+| sAMOTA | 74.54 | (4) | stdout, `sAMOTA` |
+| AMOTA | 30.23 | (4) | stdout, `AMOTA` |
+
+> **Two traps that produce plausible but wrong numbers.**
+>
+> *Step (3) prints its own `sAMOTA` and `AMOTA` — do not use them.* The
+> `metrics.txt` written by `track_inference.py` scores a **single operating
+> point**, so it reports sAMOTA 99.67 and an `AMOTA` field that merely repeats
+> MOTA (78.44). The table values are the recall-averaged ones from step (4).
+> Only step (4) is comparable to RaTrack.
+>
+> *Step (1) prints two mIoU values.* The table at the top of `metrics.txt` is
+> micro-averaged (77.67, decomposing into IoU_moving 57.88 / IoU_static 97.47);
+> the comparable figure is the frame-weighted one printed below it (74.66),
+> which replicates RaTrack's `eval_motion_seg`.
+
+Intermediate counts worth checking, in case a step silently diverges: step (2)
+should keep **2734 boxes out of 3460** GT (79.0% recall), and step (3) should
+report `TP/FP/FN = 2734 / 0 / 740` over `n_gt = 3474`.
+
 ### Inference Demo
 
 ![Inference Visualization](./docs/figures/inferencia.gif)
