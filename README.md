@@ -180,7 +180,7 @@ Performance comparison on the View of Delft dataset:
 | AB3DMOT | 51.23 | 15.00 | 46.72 | -- | 20.59 | 39.71 | evals only tracker |
 | AB3DMOT-PP *(PointPillars det.)* | 60.71 | 21.51 | 49.38 | 313 ‡ | 26.47 | 33.82 | n/a |
 | RaTrack | 74.16 | 31.50 | 67.27 | 404 | 42.65 | 14.71 | 57.00 |
-| **LocalGlobalFusion (Ours)** § | **97.69** | 9.77 | **78.44** | **9** | **58.5** | **12.3** | **74.66** |
+| **LocalGlobalFusion (Ours)** § | 74.54 | 30.23 | **78.44** | **9** | **58.5** | **12.3** | **74.66** |
 | VoxelPointFusion | 70.34 | 30.70 | 64.00 | 320 | — | — | 53.30 |
 
 § **Read the protocol before quoting this row.** Measured on the VoD validation
@@ -199,16 +199,16 @@ be carried with the numbers:
   (78.70 vs 77.83)**, i.e. 0.33 vs 13.57 switches per 100 tracked objects.
   sAMOTA and AMOTA both come from the AB3DMOT-protocol sweep in
   `amota_ab3dmot.py` (IoU 0.25), so the two are on the same footing; the
-  per-frame accumulator in `track_inference.py` prints a slightly different
-  sAMOTA (99.67) because it scores a single operating point.
-* **AMOTA is the one column where we lose, and the reason is structural.** At
-  9.77 against RaTrack's 31.50, it is not a point-of-operation score but the
-  mean of MOTA over 40 confidence thresholds. Our detection "score" is the count
-  of moving radar points in the box, and since `FP = 0` already at the lowest
-  threshold, raising it can only destroy recall — there is no precision left to
-  buy. Recall collapses from 78.7% at `thr = 1` to 1.7% at `thr = 17`, and AMOTA
-  averages over that whole curve. RaTrack, having real false positives to prune,
-  gets a genuine trade-off out of the same sweep. Reproduce with
+  per-frame accumulator in `track_inference.py` prints a much higher sAMOTA
+  (99.67) because it scores a single operating point rather than averaging over
+  the recall range, and should not be quoted against RaTrack.
+* **sAMOTA and AMOTA are capped by reachable recall, and the cap is real.** Both
+  average over 40 evenly spaced recall targets; our detection stage tops out at
+  78.7% recall, so 9 of the 40 targets are unreachable and contribute 0. That
+  puts a ceiling of 31/40 = 77.5% on sAMOTA before any tracking quality is
+  considered, and we reach 74.54 of it — i.e. ~96% average sMOTA across every
+  operating point we can actually occupy. AMOTA lands at 30.23 against RaTrack's
+  31.50, essentially level. Reproduce with
   `tracker/tracking/amota_ab3dmot.py --gt-moving-only --explain`.
 
 The mIoU cell is the **frame-weighted** mean that replicates RaTrack's
