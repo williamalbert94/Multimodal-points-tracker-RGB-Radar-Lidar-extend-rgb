@@ -10,6 +10,13 @@ por recall que NO castiga los objetos legítimamente no detectados:
 
     sAMOTA = mean_r sMOTA_r          AMOTA = mean_r max(0, MOTA_r)
 
+El promedio va sobre una grilla de RECALL uniformemente espaciada, no sobre una
+grilla de umbrales: para cada objetivo r_i = i/40 se toma el punto de operación
+que lo alcanza, y los objetivos por encima del recall máximo aportan 0. Esto
+importa cuando la distribución de scores es sesgada, porque una grilla uniforme
+sobre el rango del score deja casi todos los puntos en la zona muerta y hace que
+la métrica dependa del score máximo, cuando debería ser invariante a su escala.
+
 Matching por IoU-BEV rotado a 0.25 (default de AB3DMOT 3D). Score de la detección
 = nº de puntos móviles de la caja (proxy de confianza del GT-seg).
 
@@ -58,6 +65,49 @@ def match_frame(gt_boxes, gt_ids, pr_boxes, pr_ids, last_match, iou_thr):
     fp = npd - len(matched_p)
     fn = ng - len(matched_g)
     return tp, fp, fn, idsw, s_iou
+
+
+def umbrales_candidatos(scores, maximo=200):
+    """Umbrales donde evaluar la curva. Se toman los valores de score REALMENTE
+    presentes (o cuantiles, si hay demasiados), no una grilla uniforme sobre el
+    rango: la grilla uniforme deja casi todos los puntos en la zona muerta
+    cuando la distribución de scores es sesgada."""
+    scores = np.asarray(scores, float)
+    if len(scores) == 0:
+        return np.array([1.0])
+    unicos = np.unique(scores)
+    if len(unicos) > maximo:
+        unicos = np.unique(np.quantile(scores, np.linspace(0, 1, maximo)))
+    return unicos
+
+
+def proyectar_sobre_recall(curva, num_pts):
+    """Promedia sobre una grilla de RECALL uniformemente espaciada, que es como
+    definen AMOTA/sAMOTA AB3DMOT y nuScenes.
+
+    `curva` es una lista de (recall, mota, smota) medidos en umbrales arbitrarios.
+    Para cada objetivo de recall r_i = i/num_pts se toma el punto de operación
+    cuyo recall es el más cercano; los objetivos por encima del recall máximo
+    alcanzable no son alcanzables y aportan 0.
+
+    Promediar directamente sobre los umbrales (en vez de sobre el recall) hace
+    que la métrica dependa del valor máximo del score, cuando por construcción
+    debería ser invariante a la escala del score."""
+    if not curva:
+        return [0.0], [0.0], 0.0
+    recalls = np.array([c[0] for c in curva])
+    motas = np.array([c[1] for c in curva])
+    smotas = np.array([c[2] for c in curva])
+    r_max = float(recalls.max())
+    mota_out, smota_out = [], []
+    for i in range(1, num_pts + 1):
+        objetivo = i / num_pts
+        if objetivo > r_max:
+            mota_out.append(0.0); smota_out.append(0.0)
+            continue
+        j = int(np.argmin(np.abs(recalls - objetivo)))
+        mota_out.append(float(motas[j])); smota_out.append(float(smotas[j]))
+    return mota_out, smota_out, r_max
 
 
 def cargar_tracks_ratrack(result_dir, clips):
@@ -157,13 +207,18 @@ def main():
     ap.add_argument("--ratrack-results", default=None,
                     help="dir de results de RaTrack (evalúa SUS tracks en este protocolo)")
     ap.add_argument("--iou", type=float, default=0.25, help="umbral IoU (AB3DMOT 3D=0.25)")
-    ap.add_argument("--recall-points", type=int, default=40)
+    ap.add_argument("--recall-points", type=int, default=40,
+                    help="puntos de la grilla de RECALL sobre la que se promedia")
+    ap.add_argument("--max-umbrales", type=int, default=200,
+                    help="tope de umbrales donde se mide la curva")
     ap.add_argument("--explain", action="store_true",
                     help="imprime la descomposición término-por-término")
     ap.add_argument("--inject-fp", type=float, default=0.0,
                     help="FPs sintéticos por frame (fracción del nº de GT)")
     ap.add_argument("--gt-min-radar-points", type=int, default=0,
                     help="protocolo RaTrack: solo GT con ≥N puntos de radar")
+    ap.add_argument("--gt-moving-only", action="store_true",
+                    help="protocolo RaTrack: solo objetos GT en movimiento")
     ap.add_argument("--fov-only", action="store_true",
                     help="excluye GT y detecciones fuera del FOV de la cámara")
     ap.add_argument("--clips", nargs="+", default=VAL_CLIPS)
@@ -171,7 +226,7 @@ def main():
 
     es_ratrack = args.ratrack_results is not None
     gl = GtTrackLoader(args.dataset, min_radar_points=args.gt_min_radar_points,
-                       fov_only=args.fov_only)
+                       fov_only=args.fov_only, moving_only=args.gt_moving_only)
 
     # cachear GT por frame una vez (se reusa en todo el barrido)
     gt_cache = {}
@@ -184,26 +239,23 @@ def main():
     if es_ratrack:
         rt_tracks = cargar_tracks_ratrack(args.ratrack_results, args.clips)
         all_sc = np.array([r[2] for v in rt_tracks.values() for r in v], float)
-        lo, hi = (all_sc.min(), all_sc.max()) if len(all_sc) else (0, 1)
-        thresholds = np.linspace(lo, hi, args.recall_points)
         eval_fn = lambda thr: eval_ratrack_threshold(rt_tracks, gt_cache, args.clips, thr, args.iou)
     else:
         dets = pickle.load(open(args.detections, "rb"))
         all_sc = np.array([n for v in dets.values() for n in v.get("num_points", [])], float)
-        smax = all_sc.max() if len(all_sc) else 1
-        thresholds = np.linspace(1, smax, args.recall_points)
         rng = np.random.default_rng(0) if args.inject_fp > 0 else None
         fov_gl = gl if args.fov_only else None
         eval_fn = lambda thr: eval_a_threshold(dets, gt_cache, args.clips, thr, args.iou,
                                                inject_fp=args.inject_fp, rng=rng,
                                                fov_gl=fov_gl)
+    thresholds = umbrales_candidatos(all_sc, args.max_umbrales)
 
     if args.explain:
         print(f"\n{'thr':>7} {'recall':>7} {'TP':>6} {'FP':>5} {'FN':>7} {'IDSW':>5} "
               f"{'(1-r)·ngt':>10} {'MOTA':>7} {'sMOTA':>7}")
         print("-" * 74)
 
-    smota_list, mota_list, recalls = [], [], []
+    curva = []
     for thr in thresholds:
         r = eval_fn(thr)
         ng = max(r["NGT"], 1)
@@ -214,11 +266,13 @@ def main():
             smota = max(0.0, 1 - (errors - (1 - recall) * ng) / (recall * ng))
         else:
             smota = 0.0
-        smota_list.append(smota); mota_list.append(max(0.0, mota)); recalls.append(recall)
+        curva.append((recall, max(0.0, mota), smota))
         if args.explain:
             print(f"{thr:7.3f} {recall:7.3f} {r['TP']:6d} {r['FP']:5d} {r['FN']:7d} "
                   f"{r['IDSW']:5d} {(1-recall)*ng:10.0f} {100*mota:7.1f} {100*smota:7.1f}")
 
+    mota_list, smota_list, rec_alcanzado = proyectar_sobre_recall(
+        curva, args.recall_points)
     sAMOTA = float(np.mean(smota_list)) * 100
     AMOTA = float(np.mean(mota_list)) * 100
     r0 = eval_fn(thresholds[0])                       # con todas las detecciones
@@ -227,6 +281,8 @@ def main():
     print(f"\n{'='*60}\nPROTOCOLO AB3DMOT  IoU={args.iou}  |  {fuente}\n{'='*60}")
     print(f"  sAMOTA (escalado por recall) : {sAMOTA:.2f}%")
     print(f"  AMOTA                        : {AMOTA:.2f}%")
+    print(f"  recall máx alcanzable        : {100*rec_alcanzado:.1f}%  "
+          f"({sum(1 for m in mota_list if m > 0)}/{args.recall_points} puntos de recall alcanzables)")
     print(f"  recall máx (thr=1)           : {100*r0['TP']/ng:.1f}%")
     print(f"  MOTP (IoU medio de matches)  : {100*r0['sIoU']/max(r0['TP'],1):.1f}%")
     print(f"  TP/FP/FN (thr=1)             : {r0['TP']}/{r0['FP']}/{r0['FN']}  IDSW={r0['IDSW']}")

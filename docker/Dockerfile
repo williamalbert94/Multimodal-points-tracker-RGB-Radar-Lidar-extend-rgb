@@ -43,7 +43,11 @@ RUN echo "cd /project/" >> ~/.bashrc
 
 
 
-ENTRYPOINT ["conda", "run", "-n", "pytorch_env"]
+# El entorno que crea `requirements/environment.yml` se llama `mira`. Apuntar a
+# otro nombre hace que `docker run` directo sobre la imagen falle con
+# EnvironmentLocationNotFound; docker compose lo tapaba porque sobreescribe el
+# entrypoint con `bash`.
+ENTRYPOINT ["conda", "run", "-n", "mira"]
 WORKDIR /project/
 
 

@@ -169,9 +169,9 @@ failure modes. **Tracking** maintains an object's identity across
 matching). **Re-identification** recovers an object's identity by *appearance*
 after a gap (an occlusion, a missed detection, a temporary exit from the
 field of view) where motion continuity alone breaks down. Phase 2 of this
-project (`config/reid_phase2.yml`) trains a gallery-based ReID head on top of
-the fused radar/LiDAR backbone precisely so identity can survive such gaps,
-not just frame-to-frame motion.
+project (`tracker/tracking/train_reid.py`) trains a gallery-based ReID head on
+top of the fused radar/LiDAR backbone precisely so identity can survive such
+gaps, not just frame-to-frame motion.
 
 **Existing work on VoD.** The official View-of-Delft benchmarks cover 3D
 object detection and trajectory prediction only; there is no official VoD
