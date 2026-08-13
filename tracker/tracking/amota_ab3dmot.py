@@ -164,6 +164,8 @@ def main():
                     help="FPs sintéticos por frame (fracción del nº de GT)")
     ap.add_argument("--gt-min-radar-points", type=int, default=0,
                     help="protocolo RaTrack: solo GT con ≥N puntos de radar")
+    ap.add_argument("--gt-moving-only", action="store_true",
+                    help="protocolo RaTrack: solo objetos GT en movimiento")
     ap.add_argument("--fov-only", action="store_true",
                     help="excluye GT y detecciones fuera del FOV de la cámara")
     ap.add_argument("--clips", nargs="+", default=VAL_CLIPS)
@@ -171,7 +173,7 @@ def main():
 
     es_ratrack = args.ratrack_results is not None
     gl = GtTrackLoader(args.dataset, min_radar_points=args.gt_min_radar_points,
-                       fov_only=args.fov_only)
+                       fov_only=args.fov_only, moving_only=args.gt_moving_only)
 
     # cachear GT por frame una vez (se reusa en todo el barrido)
     gt_cache = {}

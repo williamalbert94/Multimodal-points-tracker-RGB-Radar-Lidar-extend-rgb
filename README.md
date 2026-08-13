@@ -180,7 +180,7 @@ Performance comparison on the View of Delft dataset:
 | AB3DMOT | 51.23 | 15.00 | 46.72 | -- | 20.59 | 39.71 | evals only tracker |
 | AB3DMOT-PP *(PointPillars det.)* | 60.71 | 21.51 | 49.38 | 313 ‡ | 26.47 | 33.82 | n/a |
 | RaTrack | 74.16 | 31.50 | 67.27 | 404 | 42.65 | 14.71 | 57.00 |
-| **LocalGlobalFusion (Ours)** § | **99.67** | n/a § | **78.44** | **9** | **58.5** | **12.3** | **74.66** |
+| **LocalGlobalFusion (Ours)** § | **97.69** | 9.77 | **78.44** | **9** | **58.5** | **12.3** | **74.66** |
 | VoxelPointFusion | 70.34 | 30.70 | 64.00 | 320 | — | — | 53.30 |
 
 § **Read the protocol before quoting this row.** Measured on the VoD validation
@@ -197,9 +197,19 @@ be carried with the numbers:
   upper bound, not a like-for-like result. What *is* comparable is the identity
   column: **9 switches against RaTrack's 329–367 at near-identical MODA
   (78.70 vs 77.83)**, i.e. 0.33 vs 13.57 switches per 100 tracked objects.
-* **AMOTA is not reported** because our detections carry no calibrated
-  confidence (the "score" is a radar point count), so AB3DMOT's recall sweep is
-  meaningless here. The value our accumulator prints simply repeats MOTA.
+  sAMOTA and AMOTA both come from the AB3DMOT-protocol sweep in
+  `amota_ab3dmot.py` (IoU 0.25), so the two are on the same footing; the
+  per-frame accumulator in `track_inference.py` prints a slightly different
+  sAMOTA (99.67) because it scores a single operating point.
+* **AMOTA is the one column where we lose, and the reason is structural.** At
+  9.77 against RaTrack's 31.50, it is not a point-of-operation score but the
+  mean of MOTA over 40 confidence thresholds. Our detection "score" is the count
+  of moving radar points in the box, and since `FP = 0` already at the lowest
+  threshold, raising it can only destroy recall — there is no precision left to
+  buy. Recall collapses from 78.7% at `thr = 1` to 1.7% at `thr = 17`, and AMOTA
+  averages over that whole curve. RaTrack, having real false positives to prune,
+  gets a genuine trade-off out of the same sweep. Reproduce with
+  `tracker/tracking/amota_ab3dmot.py --gt-moving-only --explain`.
 
 The mIoU cell is the **frame-weighted** mean that replicates RaTrack's
 `eval_motion_seg`, which is the only convention comparable to their published
