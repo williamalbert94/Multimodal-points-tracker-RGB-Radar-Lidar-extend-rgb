@@ -31,7 +31,9 @@
 
 This project requires access to the View of Delft dataset and corresponding tracking annotations.
 
-Weigths: [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.18933010.svg)](https://doi.org/10.5281/zenodo.18933010)
+2D projection annotations: [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.18933010.svg)](https://doi.org/10.5281/zenodo.18933010)
+
+Weights: [Google Drive](https://drive.google.com/drive/folders/1ES5mvwTNd957d1wRxdbb_hcUX75J3KGs?usp=drive_link) — `seg_exp_Q_lidarflow/best_miou_model.pth` (Phase 1 backbone) and `reid_head.pth` (Phase 2 re-identification head). Access is restricted until the thesis is published.
 
 ## Dataset
 
