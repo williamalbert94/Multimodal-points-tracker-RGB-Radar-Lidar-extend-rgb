@@ -172,6 +172,13 @@ Pre-trained weights for both phases are available. Simply point to them in the c
 
 Performance comparison on the View of Delft dataset:
 
+| Configuration | mIoU | IoU moving | IoU static | Precision | Recall | F1 |
+|---|---|---|---|---|---|---|
+| LiDAR–Radar + MASG | **0.773** | **0.574** | **0.973** | **0.671** | 0.799 | **0.729** |
+| Radar + MASG | 0.721 | 0.479 | 0.964 | 0.578 | 0.736 | 0.648 |
+| LiDAR–Radar, no MASG | 0.741 | 0.518 | 0.965 | 0.578 | **0.834** | 0.683 |
+| Radar, no MASG | 0.705 | 0.448 | 0.961 | 0.558 | 0.696 | 0.619 |
+
 ## References
 
 This repository contains basic elements for evaluating metrics and loading data, adapted from:
