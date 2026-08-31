@@ -32,7 +32,7 @@
 This project requires access to the View of Delft dataset and corresponding tracking annotations.
 
 Weigths: [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.18933010.svg)](https://doi.org/10.5281/zenodo.18933010)
-reports error reprojection: https://doi.org/10.5281/zenodo.22212989
+reports error reprojection: [![DOI](https://doi.org/10.5281/zenodo.22212989)
 
 ## Dataset
 
