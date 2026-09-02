@@ -282,6 +282,25 @@ docker compose -f docker/docker-compose.yml run --rm tracker_multimodal_mira \
     -lc "bash scripts/ablacao_taxa_caixa.sh"
 ```
 
+### Field deployment: maritime surveillance radar
+
+The annotation protocol was applied to a real-aperture maritime radar in
+B-scope, with several optical cameras as context. A YOLOv8 detector trained on
+3804 annotated radar frames reaches:
+
+| mAP@50 | mAP@75 | mAP@50-95 | mAP medium | mAP small |
+|---|---|---|---|---|
+| **0.81** | 0.64 | 0.54 | 0.64 | 0.49 |
+
+The gap between medium and small targets is the whole story of the deployment:
+below roughly 25x32 pixels, clutter and vessel become visually indistinguishable
+to the annotator and to the model alike. The detector's most useful property is
+that it stays silent rather than firing on terrain or noise.
+
+**[Read the full case study →](./docs/pages/maritime_radar_case_study.md)** —
+annotation workflow, sensor pairing by timestamp, the difficulties the
+annotators reported, and the training setup.
+
 ## References
 
 This repository contains basic elements for evaluating metrics and loading data, adapted from:

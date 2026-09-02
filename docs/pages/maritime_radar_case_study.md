@@ -144,9 +144,24 @@ radar.
 
 ## Results
 
-The three architectures did not differ significantly from one another: with a
-dataset this small, this self-similar and this dominated by small instances,
-capacity was not the limiting factor.
+| Metric | Value |
+|---|---|
+| mAP@50 | **0.81** |
+| mAP@75 | 0.64 |
+| mAP@50-95 | 0.54 |
+| mAP medium | 0.64 |
+| mAP small | 0.49 |
+
+The three architectures did not differ significantly from one another — all
+three land inside a band a few thousandths wide on every metric. With a dataset
+this small, this self-similar and this dominated by small instances, capacity
+was not the limiting factor.
+
+!!! info "Where these numbers come from"
+    The source report presents these results as a parallel-coordinates plot
+    rather than a table, so the values above are read off its axes and rounded
+    to two decimals. They span the three architectures, which the report states
+    do not differ significantly.
 
 **Where the model works.** Medium-sized targets are detected reliably, including
 a vessel crossing the scene together with the wake of its own motion, and
