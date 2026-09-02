@@ -10,7 +10,7 @@
 [![docker](https://img.shields.io/badge/docker-supported-2496ED.svg)](./docker/Dockerfile)
 [![license](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
 
-📖 [Introduction](./docs/pages/introduction.md) | ⚙️ [Installation](./docs/pages/installation.md) | 🚀 [Get Started](#-getting-started) | 📘 [Documentation](./docs/pages/documentation.md)
+📖 [Introduction](./docs/pages/introduction.md) | ⚙️ [Installation](./docs/pages/installation.md) | 🚀 [Get Started](#-getting-started) | 📘 [Documentation](./docs/pages/documentation.md) | 🛰️ [Maritime radar case study](./docs/pages/maritime_radar_case_study.md)
 
 </div>
 
