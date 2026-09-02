@@ -33,7 +33,7 @@ This project requires access to the View of Delft dataset and corresponding trac
 
 2D manual boxes to measure the reprojection error 4D to 2D: [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.18933010.svg)](https://doi.org/10.5281/zenodo.18933010)
 
-Weights: [![DOI][(https://zenodo.org/badge/DOI/10.5281/zenodo.18933010.svg)](https://doi.org/10.5281/zenodo.18933010)](https://doi.org/10.5281/zenodo.21924902)](https://doi.org/10.5281/zenodo.21924902)
+Weights: [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.18933010.svg)](https://doi.org/10.5281/zenodo.18933010.svg)](https://doi.org/10.5281/zenodo.21924902)
 [Google Drive](https://drive.google.com/drive/folders/1ES5mvwTNd957d1wRxdbb_hcUX75J3KGs?usp=drive_link) — `seg_exp_Q_lidarflow/best_miou_model.pth` (Phase 1 backbone) and `reid_head.pth` (Phase 2 re-identification head). Access is restricted until the thesis is published.
 
 ## Dataset
