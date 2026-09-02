@@ -121,26 +121,30 @@ architecture.
 
 ## Detection method
 
-YOLOv8 was chosen for its handling of multi-scale targets and its behaviour
-under transfer learning from COCO.
+The detector is a single-stage, anchor-free convolutional architecture with a
+multi-scale feature pyramid, initialised from weights pre-trained on a large
+natural-image corpus. It was selected for its handling of targets that vary
+widely in scale and for its behaviour under transfer learning. Three model
+scales of the same family were trained.
 
 | Hyperparameter | Value |
 |---|---|
-| Architecture | YOLOv8 X, L and S |
+| Model scales trained | three, same family |
 | Image scale | 1920 × 1088 |
 | Optimiser | SGD, learning rate 0.01 |
 | Batch size | 22 |
 | Loss | GIoU |
-| Pre-training | COCO |
+| Initialisation | pre-trained on natural images |
 | Epochs | 65 |
 
-**Partial freezing.** The early backbone layers were frozen — they capture edges
-and textures, which transfer across domains — while the upper neck layers stayed
-trainable, in particular P2 and the last four. Those are the ones that perform
-multi-scale fusion and build the contextual representation specific to the size
-and pattern of radar targets. The model therefore keeps its generic knowledge of
-natural images while adapting to the low resolution and characteristic noise of
-radar.
+**Partial freezing.** The early feature-extraction layers were frozen — they
+capture edges and textures, which transfer across domains — while the upper
+layers of the multi-scale aggregation stage stayed trainable, in particular the
+highest-resolution level and the last four layers. Those are the ones that fuse
+features across scales and build the contextual representation specific to the
+size and pattern of radar targets. The model therefore keeps its generic
+knowledge of natural images while adapting to the low resolution and
+characteristic noise of radar.
 
 ## Results
 
@@ -152,15 +156,15 @@ radar.
 | mAP medium | 0.64 |
 | mAP small | 0.49 |
 
-The three architectures did not differ significantly from one another — all
-three land inside a band a few thousandths wide on every metric. With a dataset
+The three model scales did not differ significantly from one another — all three
+land inside a band a few thousandths wide on every metric. With a dataset
 this small, this self-similar and this dominated by small instances, capacity
 was not the limiting factor.
 
 !!! info "Where these numbers come from"
     The source report presents these results as a parallel-coordinates plot
     rather than a table, so the values above are read off its axes and rounded
-    to two decimals. They span the three architectures, which the report states
+    to two decimals. They span the three model scales, which the report states
     do not differ significantly.
 
 **Where the model works.** Medium-sized targets are detected reliably, including

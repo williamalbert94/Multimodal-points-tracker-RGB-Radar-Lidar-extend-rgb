@@ -285,8 +285,8 @@ docker compose -f docker/docker-compose.yml run --rm tracker_multimodal_mira \
 ### Field deployment: maritime surveillance radar
 
 The annotation protocol was applied to a real-aperture maritime radar in
-B-scope, with several optical cameras as context. A YOLOv8 detector trained on
-3804 annotated radar frames reaches:
+B-scope, with several optical cameras as context. A detector trained on 3804
+annotated radar frames reaches:
 
 | mAP@50 | mAP@75 | mAP@50-95 | mAP medium | mAP small |
 |---|---|---|---|---|
