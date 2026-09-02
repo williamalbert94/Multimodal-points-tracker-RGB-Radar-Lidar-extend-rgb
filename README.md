@@ -162,6 +162,39 @@ Enable `plot_reid` to visualize results similar to the following:
 
 **Note:** This phase trains with perfect boxes and segmentation. During inference, the pre-trained model from Phase 1 is used.
 
+### Optional detection sources
+
+The tracker consumes detections from a pickle, so the box source is a plug-in
+choice — `track_inference.py --detections <file>` accepts any of these and
+**none of them is required by the main pipeline**:
+
+| entry point | box comes from | notes |
+|---|---|---|
+| `precompute_detections_gtseg.py` | ground-truth box kept when the segmentation finds a moving radar point inside | upper bound; perfect localisation |
+| `precompute_detections.py` | DBSCAN over the moving radar points, oriented box by PCA | the plain detector |
+| `precompute_detections_dbscan_reid.py` | same, plus Doppler in the clustering, LiDAR-measured extent and pooled features for re-identification | see flags below |
+| `precompute_detections_rgb.py` | 2D detector, LiDAR frustum lifted to 3D | Faster R-CNN, torchvision |
+| `precompute_detections_yolo.py` | 2D detector matched against the annotated 2D boxes | needs `pip install ultralytics`, **not** in the base environment |
+
+`precompute_detections_dbscan_reid.py` adds two switchable things over the plain
+detector:
+
+```bash
+# Doppler as a third clustering dimension: two objects that touch in space but
+# move differently no longer collapse into one cluster
+--peso-doppler 0.5      # metres equivalent per m/s; 0 restores XY-only clustering
+
+# extent and yaw from the dense LiDAR around the cluster, instead of a class prior
+--sin-lidar             # restores the class prior
+```
+
+`precompute_detections_yolo.py` can merge its output with any other source that
+emits ground-truth boxes, so the camera contributes what the radar misses:
+
+```bash
+--union-con tracker/results/detections_gtseg_val_mov_norider.pkl
+```
+
 ## Evaluation
 
 Run inference with the pre-trained segmentation model:
