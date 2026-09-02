@@ -27,3 +27,4 @@ nav:
   - Documentation: pages/documentation.md
   - 3D->2D reprojection: pages/reprojection.md
   - LiDAR-radar fusion: pages/fusion.md
+  - Maritime radar case study: pages/maritime_radar_case_study.md
