@@ -10,15 +10,10 @@
 # Como 0,15 s nao cai na grelha de 0,10 s, esse intervalo e obtido alternando
 # saltos de 2 e 1 quadro (media 0,15 s = 6,7 Hz).
 #
-# Valores medidos (MOTA / HOTA / IDSW / ML):
-#   10  Hz (0,10 s)  99.14 / 57.73 /  0 / 0.0     deslocamento do objeto: 0,37 m (19% do comprimento)
-#   6,7 Hz (0,15 s)  56.84 / 46.04 / 12 / 0.0                             0,55 m (28%)
-#   5   Hz (0,20 s)  33.20 / 41.13 / 19 / 2.6                             0,73 m (37%)
-#
-# Nota de reprodutibilidade: os valores acima foram medidos sobre os 1289
-# quadros do split de validacao tal como exportados; este script usa as listas
-# de clipes do proprio repo (1292 quadros, 3 a mais). As diferencas ficam na
-# terceira casa decimal.
+# Valores produzidos por este script (MOTA / HOTA / IDF1 / IDSW):
+#   10  Hz (0,10 s)  100.00 / 58.37 / 96.68 /  0   deslocamento do objeto: 0,37 m (19% do comprimento)
+#   6,7 Hz (0,15 s)   53.97 / 46.28 / 71.09 / 13                           0,55 m (28%)
+#   5   Hz (0,20 s)   35.41 / 41.52 / 60.59 / 18                           0,73 m (37%)
 #
 # Uso (dentro do contentor):  bash scripts/ablacao_taxa_caixa.sh
 set -euo pipefail

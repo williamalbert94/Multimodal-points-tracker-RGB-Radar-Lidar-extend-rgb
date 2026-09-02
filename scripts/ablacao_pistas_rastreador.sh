@@ -26,11 +26,21 @@ if [ ! -f "$DETS" ]; then
   exit 1
 fi
 
+# A cabeca Re-ID e OBRIGATORIA aqui. Sem ela o rastreador roda em modo
+# movimento (`use_appearance=False`) e o peso de aparencia deixa de ter efeito:
+# as linhas "completa", "sem aparencia" e "sem geometria" saem identicas.
+REID=${REID:-${SAIDA}/reid_head.pth}
+if [ ! -f "$REID" ]; then
+  echo "[erro] falta a cabeca Re-ID: $REID" >&2
+  echo "       baixe os pesos indicados no README (secao Prerequisites)." >&2
+  exit 1
+fi
+
 rodar() {  # $1 = nome, $2..$6 = pesos
   local nome=$1; shift
   echo "===== ${nome} ====="
   $PY -u -m tracker.tracking.track_inference \
-      --detections "$DETS" --gt-moving-only --cada 100000 \
+      --detections "$DETS" --reid-head "$REID" --gt-moving-only --cada 100000 \
       --weights "$@" --out "${SAIDA}/abl_${nome}"
 }
 

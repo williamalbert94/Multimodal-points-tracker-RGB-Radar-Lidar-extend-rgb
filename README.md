@@ -113,6 +113,14 @@ The architecture combines:
 - **Global features**: Scene-level context from voxelized representations
 - **Multimodal fusion**: Integration of LiDAR point clouds and camera images
 
+### Radar–LiDAR registration
+
+The radar sits on the bumper and the LiDAR on the roof, so the two clouds must be
+brought into a common frame before any fusion. The extrinsic is composed through
+the camera and applied to every LiDAR point.
+
+![Radar–LiDAR registration](./docs/figures/radar_lidar_registration.png)
+
 ## 🚀 Getting Started
 
 ### Phase 1: Backbone Pre-training
@@ -192,19 +200,18 @@ zeroes one of them. Detections are the same for every row (GT box kept when the
 segmentation finds a moving radar point inside), so the only thing that changes
 is the association.
 
-| Cue removed | MOTA | IDSW |
-|---|---|---|
-| none (reference) | 79.18 | 12 |
-| appearance | **79.53** | **5** |
-| density | 79.18 | 12 |
-| spatial | 79.07 | 14 |
-| geometry | 78.87 | 18 |
-| motion | 78.67 | 22 |
+| Cue removed | sAMOTA | MOTA | IDSW |
+|---|---|---|---|
+| none (reference) | 76.50 | 72.44 | 119 |
+| appearance | 76.47 | 72.09 | 126 |
+| density | 76.65 | 72.19 | 119 |
+| geometry | 76.22 | 72.16 | 179 |
+| motion | 76.15 | 71.98 | 218 |
+| spatial | 76.35 | 72.34 | 139 |
 
-Motion is the cue that carries the association: removing it nearly doubles the
-identity switches. Appearance is the only one whose removal *improves* the
-result — with boxes this accurate, motion alone already resolves the matching and
-the appearance descriptor only adds noise.
+Motion is the cue that carries the association: removing it raises the identity
+switches from 119 to 218, by far the largest effect. Geometry comes second (179).
+Density is the least useful — removing it leaves the switches unchanged.
 
 ```bash
 bash scripts/gerar_deteccoes_gtseg.sh      # detections used by the rows above
@@ -219,16 +226,16 @@ changes rate. On frames without a box the object does not disappear — it still
 exists through the segmentation — and its box is rebuilt from the radar points
 assigned to it.
 
-| Box rate | Object displacement between updates | MOTA | HOTA | IDF1 | IDSW | ML |
-|---|---|---|---|---|---|---|
-| 10 Hz (0.10 s) | 0.37 m (19% of its length) | 99.14 | 57.73 | 96.24 | 0 | 0.0 |
-| 6.7 Hz (0.15 s) | 0.55 m (28%) | 56.84 | 46.04 | 70.82 | 12 | 0.0 |
-| 5 Hz (0.20 s) | 0.73 m (37%) | 33.20 | 41.13 | 60.17 | 19 | 2.6 |
+| Box rate | Object displacement between updates | MOTA | HOTA | IDF1 | IDSW |
+|---|---|---|---|---|---|
+| 10 Hz (0.10 s) | 0.37 m (19% of its length) | 100.00 | 58.37 | 96.68 | 0 |
+| 6.7 Hz (0.15 s) | 0.55 m (28%) | 53.97 | 46.28 | 71.09 | 13 |
+| 5 Hz (0.20 s) | 0.73 m (37%) | 35.41 | 41.52 | 60.59 | 18 |
 
-With a fresh box on every frame the tracker reaches MOTA 99.14 with zero identity
-switches: it is not the bottleneck of the system. Halving the box rate costs 42
-points of MOTA while the identity switches stay in single digits — what breaks is
-the geometry, not the association.
+With a fresh box on every frame the tracker is exact — MOTA 100.00, zero identity
+switches, every trajectory mostly tracked: it is not the bottleneck of the system.
+Halving the box rate costs 65 points of MOTA while the identity switches stay in
+double digits — what breaks is the geometry, not the association.
 
 ```bash
 bash scripts/ablacao_taxa_caixa.sh

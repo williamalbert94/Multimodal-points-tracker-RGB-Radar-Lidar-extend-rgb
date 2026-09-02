@@ -30,9 +30,10 @@ for EXP in seg_exp_Q_lidarflow seg_exp_R_radaronly seg_exp_S_nomasg seg_exp_T_no
   $PY -u -m tracker.runner.inference_seg \
       --config "tracker/config/${EXP}.yaml" \
       --checkpoint "$CK" \
-      --output "${SAIDA}/${EXP}" \
+      --output "${SAIDA}" \
       --umbral 0.5 --cada 100000
 done
 
 echo
 echo "Metricas de cada variante: ${SAIDA}/<exp>/metrics.txt (coluna 'limiar 0.50')."
+echo "Valores reproduzidos: Q 0.7734 | R 0.7211 | S 0.7414 | T 0.7048 (mIoU)."
