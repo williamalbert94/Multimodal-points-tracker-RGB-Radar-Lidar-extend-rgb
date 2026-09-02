@@ -49,15 +49,33 @@ def main():
     ap.add_argument("--clips", nargs="+", default=VAL_CLIPS)
     ap.add_argument("--cada", type=int, default=1, help="guardar figura cada N frames")
     ap.add_argument("--gt-min-radar-points", type=int, default=0)
+    ap.add_argument("--gt-moving-only", action="store_true",
+                    help="protocolo RaTrack: solo objetos GT en movimiento")
+    ap.add_argument("--gt-all-classes", action="store_true",
+                    help="no excluye peatón ni las demás de EXCLUDE_TYPES")
+    ap.add_argument("--gt-classes", nargs="+", default=None, metavar="TIPO",
+                    help="restringe el GT a estos tipos (ej: Car truck moped_scooter)")
     ap.add_argument("--fov-only", action="store_true",
                     help="excluye GT y detecciones fuera del FOV de la cámara")
+    ap.add_argument("--ema-alpha", type=float, default=0.9,
+                    help="peso del descriptor acumulado: 0.9 = galería con EMA, "
+                         "0.0 = descriptor de la última observación")
     ap.add_argument("--max-age", type=int, default=10)
+    ap.add_argument("--weights", nargs=5, type=float, default=None,
+                    metavar=("APP", "GEOM", "DENS", "MOT", "SPA"),
+                    help="pesos de las cinco pistas SIN normalizar; el tracker los "
+                         "renormaliza a 1 (poner una en 0 = ablation leave-one-out)")
     ap.add_argument("--match-threshold", type=float, default=0.3)
+    ap.add_argument("--coast", type=int, default=0,
+                    help="frames que se sigue emitiendo una trayectoria sin "
+                         "detección, extrapolando por velocidad constante")
     args = ap.parse_args()
 
     dets = pickle.load(open(args.detections, "rb"))
     gl = GtTrackLoader(args.dataset, min_radar_points=args.gt_min_radar_points,
-                       fov_only=args.fov_only)
+                       fov_only=args.fov_only, moving_only=args.gt_moving_only,
+                       keep_types=args.gt_classes,
+                       exclude_types={"DontCare"} if args.gt_all_classes else None)
     loc = VodTrackLocations(root_dir=args.dataset, output_dir=args.dataset,
                             frame_set_path="", pred_dir="")
 
@@ -77,9 +95,14 @@ def main():
 
     for ci, clip in enumerate(args.clips):
         frames = read_clip_frames(os.path.join(CLIPS_DIR, f"{clip}.txt"))
-        tracker = GalleryTracker(max_age=args.max_age,
+        w = args.weights or (0.30, 0.20, 0.10, 0.20, 0.20)
+        tracker = GalleryTracker(max_age=args.max_age, ema_alpha=args.ema_alpha,
                                  matching_threshold=args.match_threshold,
-                                 use_appearance=bool(args.reid_head))
+                                 use_appearance=bool(args.reid_head),
+                                 coast_frames=args.coast,
+                                 weight_appearance=w[0], weight_geometry=w[1],
+                                 weight_density=w[2], weight_motion=w[3],
+                                 weight_spatial=w[4])
         for k, f in enumerate(frames):
             d = dets.get(int(f), {"boxes": np.zeros((0, 7), np.float32)})
             det_boxes = np.asarray(d["boxes"], np.float32)
@@ -135,6 +158,7 @@ def main():
     m = acc.compute_metrics()
     os.makedirs(args.out, exist_ok=True)
     filtro = (f"GT-box + segmentación (móvil)"
+              + (" + solo objetos en movimiento" if args.gt_moving_only else "")
               + (f" + ≥{args.gt_min_radar_points} pts radar" if args.gt_min_radar_points else ""))
     apar = "con apariencia (ReID)" if args.reid_head else "sin apariencia (movimiento)"
     lineas = [

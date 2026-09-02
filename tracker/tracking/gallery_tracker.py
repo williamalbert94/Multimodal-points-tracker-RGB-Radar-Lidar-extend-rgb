@@ -24,8 +24,12 @@ from tracker.detection.metrics_3d import compute_rotated_iou_2d
 class TrackGallery:
     """Estado/galería de un track individual."""
 
-    def __init__(self, track_id, box, embedding=None, num_points=0):
+    def __init__(self, track_id, box, embedding=None, num_points=0, ema_alpha=0.9):
         self.id = track_id
+        # Peso del descriptor ACUMULADO frente al de la última observación.
+        # 0.9 = galería con EMA (comportamiento original); 0.0 = el descriptor es
+        # siempre el de la última observación, sin memoria de apariencia.
+        self.ema_alpha = float(ema_alpha)
         # apariencia
         self.embedding = embedding
         self.embedding_history = [embedding] if embedding is not None else []
@@ -68,7 +72,7 @@ class TrackGallery:
             if self.embedding is None:
                 self.embedding = embedding.copy()
             else:
-                a = 0.9
+                a = self.ema_alpha
                 self.embedding = a * self.embedding + (1 - a) * embedding
             self.embedding_history.append(embedding)
             self.embedding_history = self.embedding_history[-10:]
@@ -112,10 +116,19 @@ class GalleryTracker:
 
     def __init__(self, max_age=10, min_hits=1, matching_threshold=0.3,
                  weight_appearance=0.30, weight_geometry=0.20, weight_density=0.10,
-                 weight_motion=0.20, weight_spatial=0.20, use_appearance=True):
+                 weight_motion=0.20, weight_spatial=0.20, use_appearance=True,
+                 coast_frames=0, ema_alpha=0.9):
         self.max_age = max_age
+        # Ver TrackGallery: 0.9 = galería con EMA; 0.0 = última observación.
+        self.ema_alpha = float(ema_alpha)
         self.min_hits = min_hits
         self.matching_threshold = matching_threshold
+        # Cuántos frames se sigue EMITIENDO una trayectoria sin detección, con la
+        # posición extrapolada por velocidad constante. Con 0 la trayectoria queda
+        # viva internamente pero invisible en la salida, así que un hueco corto de
+        # detección se contabiliza como falso negativo aunque la asociación no se
+        # haya perdido.
+        self.coast_frames = int(coast_frames)
         self.use_appearance = use_appearance
 
         w = {"app": weight_appearance, "geom": weight_geometry,
@@ -191,7 +204,7 @@ class GalleryTracker:
 
     # ── internos ─────────────────────────────────────────────────────────────
     def _nuevo(self, box, emb, npts):
-        t = TrackGallery(self._next_id, box, emb, npts)
+        t = TrackGallery(self._next_id, box, emb, npts, self.ema_alpha)
         self._next_id += 1
         self.tracks.append(t)
         return t.id
@@ -205,8 +218,15 @@ class GalleryTracker:
     def _salida(self):
         out_boxes, out_ids = [], []
         for t in self.tracks:
-            if t.hits >= self.min_hits and t.frames_since_update == 0:
+            if t.hits < self.min_hits:
+                continue
+            if t.frames_since_update == 0:
                 out_boxes.append(t.box)
+                out_ids.append(t.id)
+            elif t.frames_since_update <= self.coast_frames:
+                caja = t.box.copy()
+                caja[:3] = t.center + t.velocity * (0.1 * t.frames_since_update)
+                out_boxes.append(caja)
                 out_ids.append(t.id)
         if not out_boxes:
             return np.zeros((0, 7), np.float32), np.zeros(0, int)
