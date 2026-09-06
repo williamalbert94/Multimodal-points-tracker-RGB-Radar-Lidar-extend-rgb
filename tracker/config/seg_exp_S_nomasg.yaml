@@ -1,0 +1,82 @@
+# Segmentación de puntos móvil/estático sobre la nube de radar (View-of-Delft).
+# Config del detector: fusión temprana LiDAR-radar + rama temporal (radar) +
+# rama temporal contra LiDAR denso.
+
+exp_name: seg_exp_S_nomasg
+mode: train
+cuda_device: "0"
+seed: 5012
+
+dataset_path: /project/view_of_delft_PUBLIC
+num_points: 2048
+in_channels: 6                     # 3 de radar (RCS, v_r, v_r_comp) + 3 stats LiDAR
+batch_size: 6
+num_workers: 8
+shuffle: false
+static_object_handling: filter
+
+# ── Fusión temprana LiDAR-radar ───────────────────────────────────────────────
+fusion: radar_base                 # cada punto de radar + geometría LiDAR local
+fusion_radius: 2.0                 # radio (m) para las estadísticas LiDAR
+
+# ── Normalización de features (z-score por canal, sobre el split de train) ────
+# canales: [RCS, v_r, v_r_comp, n_vecinos, altura_media, rango_altura]
+feat_mean: [-12.4420, -3.1929, 0.0394, 4.0995, 0.0366, 1.0765]
+feat_std:  [14.0193, 2.7273, 2.0658, 3.0284, 1.0213, 0.9654]
+
+# ── Ramas temporales ──────────────────────────────────────────────────────────
+use_temporal: true                 # correlador contra el frame anterior (t-1)
+temporal_knn: 8                    # vecinos en el cost volume
+gap_aug: true                      # (train) varía la línea base temporal t-1/t-2
+lidar_temporal: true               # 2do correlador contra el LiDAR denso de t-1
+aug: true                          # (train) jitter espacial
+augmentation:
+  rotation_range: 0
+  scaling_range: null
+  jitter_std: 0.02
+  dropout_ratio: 0
+
+min_obj_points: 0
+gt_box_margin: 0.25
+
+extractor: PNHead
+
+# ── Pérdida ───────────────────────────────────────────────────────────────────
+w_moving: 0.7
+w_static: 0.3
+dice_weight: 0.6
+focal_weight: 1.0
+focal_alpha: 0.75
+focal_gamma: 2.0
+feat_contrast_weight: 0.2
+
+# ── Optimización ──────────────────────────────────────────────────────────────
+epochs: 95
+lr: 0.0003
+weight_decay: 0.0001
+scheduler_patience: 5
+scheduler_factor: 0.5
+scheduler_min_lr: 0.000001
+
+val_every: 2
+early_stop_patience: 12
+checkpoint_dir: /project/tracker/checkpoints
+
+mlflow_enabled: false
+mlflow_experiment: segmentacion_vod
+
+# ── ABLATION DEL MASG ─────────────────────────────────────────────────────────
+# Receta EXACTA de `seg_exp_Q_lidarflow.yaml`; lo único que cambia es
+# `extractor: PNHead` en vez de `LocalGlobalFusionSimple`.
+#
+# `PNHead` y `LocalGlobalFusionSimple` son idénticas (mismos sa1/sa2/sa3, mismos
+# fp1/fp2/fp3, mismos linear1/2/3); la ÚNICA diferencia es que LGFSimple aplica,
+# sobre `l3_points`, el MASG (`GlobalStatisticsModule` -> 5 estadísticas
+# globales) y las fusiona con `fusion_conv` (Conv1d 64+5 -> 64). PNHead pasa
+# `l3_points` directo a `fp3`.
+#
+# CAVEAT a declarar: esto quita el MASG *y* la `fusion_conv`, así que mezcla
+# "las 5 estadísticas aportan información" con "una 1x1 conv extra aporta
+# capacidad". Esa conv son 69*64+64 = 4480 parámetros sobre ~740k del modelo:
+# 0.6%. Si se quiere aislar solo la información, hace falta una variante que
+# mantenga la conv y ponga las 5 estadísticas en cero.

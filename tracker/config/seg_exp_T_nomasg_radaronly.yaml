@@ -1,0 +1,82 @@
+# Control RADAR-SOLO LIMPIO del ablation de fusión: la receta EXACTA de
+# `seg_exp_Q_lidarflow.yaml` con el LiDAR quitado y nada más cambiado.
+#
+# Único cambio respecto de Q: `fusion: none` (3 canales de radar en vez de 6) y
+# se elimina `lidar_temporal`. Todo lo demás — semilla, num_points, batch,
+# temporal_knn 8, gap_aug, jitter 0.02, lr 3e-4, pérdidas, scheduler,
+# early stop — es idéntico a Q.
+#
+# Existe porque `seg_exp_G_knn32` (el otro run radar-solo) difiere de Q también
+# en `temporal_knn` (32 vs 8) y no tiene `gap_aug` ni `aug`, así que G vs Q NO es
+# un ablation de variable única. Este sí.
+
+exp_name: seg_exp_T_nomasg_radaronly
+mode: train
+cuda_device: "0"
+seed: 5012
+
+dataset_path: /project/view_of_delft_PUBLIC
+num_points: 2048
+in_channels: 3                     # RCS, v_r, v_r_comp (sin las 3 stats LiDAR)
+batch_size: 6
+num_workers: 8
+shuffle: false
+static_object_handling: filter
+
+# ── Sin fusión: la nube es el radar crudo ─────────────────────────────────────
+fusion: none
+fusion_radius: 0.5
+
+# ── Normalización de features (z-score por canal, sobre el split de train) ────
+# canales: [RCS, v_r, v_r_comp] — mismos 3 primeros valores que usa Q
+feat_mean: [-12.4420, -3.1929, 0.0394]
+feat_std:  [14.0193, 2.7273, 2.0658]
+
+# ── Rama temporal (solo radar t-1; SIN el correlador contra LiDAR denso) ──────
+use_temporal: true
+temporal_knn: 8
+gap_aug: true
+# lidar_temporal: (ausente a propósito — es la segunda vía por la que Q usa LiDAR)
+aug: true
+augmentation:
+  rotation_range: 0
+  scaling_range: null
+  jitter_std: 0.02
+  dropout_ratio: 0
+
+min_obj_points: 0
+gt_box_margin: 0.25
+
+extractor: PNHead
+
+# ── Pérdida (idéntica a Q) ────────────────────────────────────────────────────
+w_moving: 0.7
+w_static: 0.3
+dice_weight: 0.6
+focal_weight: 1.0
+focal_alpha: 0.75
+focal_gamma: 2.0
+feat_contrast_weight: 0.2
+
+# ── Optimización (idéntica a Q) ───────────────────────────────────────────────
+epochs: 95
+lr: 0.0003
+weight_decay: 0.0001
+scheduler_patience: 5
+scheduler_factor: 0.5
+scheduler_min_lr: 0.000001
+
+val_every: 2
+early_stop_patience: 12
+checkpoint_dir: /project/tracker/checkpoints
+
+mlflow_enabled: false
+mlflow_experiment: segmentacion_vod
+
+# ── CELDA "sem MASG + sem LiDAR" do fatorial 2x2 ──────────────────────────────
+# Idêntico a `seg_exp_R_radaronly.yaml` (que já é a receita exata de Q sem
+# LiDAR), trocando apenas `extractor: PNHead` — ou seja, sem MASG.
+#
+# Fatorial:            com MASG                     sem MASG
+#   com LiDAR    seg_exp_Q_lidarflow          seg_exp_S_nomasg
+#   sem LiDAR    seg_exp_R_radaronly          seg_exp_T_nomasg_radaronly  <-- este

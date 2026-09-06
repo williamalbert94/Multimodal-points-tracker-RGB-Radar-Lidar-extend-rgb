@@ -1,0 +1,65 @@
+# Experimento B: fusión temprana LiDAR-radar.
+#
+# Parte del Experimento C (pérdida enfocada en móvil + GT con margen) y agrega
+# geometría del LiDAR a cada punto de radar.
+#
+# ¿Por qué el modo `radar_base` y no los otros?
+# ---------------------------------------------
+# El radar da ~330 puntos por frame; el LiDAR ~170.000. Los modos que usan al
+# LiDAR como base cambian por completo la nube (y con ella el denominador de las
+# métricas), así que dejarían de ser comparables con los experimentos previos.
+# `radar_base` conserva EXACTAMENTE los mismos puntos de radar —y por lo tanto la
+# misma métrica— pero le describe a cada uno cómo es el LiDAR a su alrededor:
+# cuántos vecinos tiene, la altura media y el rango de alturas. Eso le da a la red
+# la noción de forma/tamaño que al radar solo le falta, sin perder el Doppler.
+#
+# Canales de entrada: 6 = [RCS, v_r, v_r_comp] + [n_vecinos, altura_media, rango_altura]
+#
+# Nota: este modo NO puede recuperar el 8.2% de objetos que el radar nunca vio
+# (no agrega puntos nuevos). Para eso habría que usar `lidar_base`, que sí agrega
+# puntos pero deja sin Doppler a la mayoría — se probaría después.
+
+exp_name: seg_exp_B_fusion
+mode: train
+cuda_device: "0"
+seed: 5012
+
+dataset_path: /project/view_of_delft_PUBLIC
+num_points: 2048
+in_channels: 6                     # <-- 3 de radar + 3 estadísticas del LiDAR
+batch_size: 2
+num_workers: 4
+shuffle: false
+static_object_handling: filter
+
+# ── Fusión ────────────────────────────────────────────────────────────────────
+fusion: radar_base
+fusion_radius: 2.0                 # radio en metros para mirar el LiDAR vecino
+
+aug: false
+min_obj_points: 2
+gt_box_margin: 0.25
+
+extractor: LocalGlobalFusionSimple
+
+# ── Pérdida enfocada en la clase móvil (igual que el Exp C) ───────────────────
+w_moving: 0.7
+w_static: 0.3
+dice_weight: 0.6
+focal_weight: 1.0
+focal_alpha: 0.75
+focal_gamma: 2.0
+feat_contrast_weight: 0.2
+
+epochs: 95
+lr: 0.0002
+weight_decay: 0.0001
+scheduler_patience: 5
+scheduler_factor: 0.5
+scheduler_min_lr: 0.000001
+
+val_every: 2
+checkpoint_dir: /project/tracker/checkpoints
+
+mlflow_enabled: true
+mlflow_experiment: segmentacion_vod

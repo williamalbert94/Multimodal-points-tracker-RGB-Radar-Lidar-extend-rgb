@@ -1,0 +1,48 @@
+# Experimento A: usar la velocidad radial COMPENSADA (v_r_comp).
+#
+# Único cambio respecto a la recreación (segmentation_phase1_recreacion):
+#   in_channels: 2 -> 3
+# Con 3 canales, la red recibe [RCS, v_r, v_r_comp]. La compensada (v_r_comp)
+# separa casi perfecto móvil/estático (estático ~0, móvil ~1.4), mientras que la
+# cruda (v_r) confunde (estático parece más rápido por el ego-movimiento).
+#
+# Objetivo: ver cuánto sube el IoU_móvil de validación respecto al 0.2866 de la
+# recreación (que usaba solo [RCS, v_r]).
+
+exp_name: seg_exp_A_vrcomp
+mode: train
+cuda_device: "0"
+seed: 5012
+
+dataset_path: /project/view_of_delft_PUBLIC
+num_points: 2048
+in_channels: 3                     # <-- CAMBIO: incluye v_r_comp (antes 2)
+batch_size: 2
+num_workers: 4
+shuffle: false
+static_object_handling: filter
+fusion: none
+fusion_radius: 0.5
+
+aug: false
+min_obj_points: 2
+
+extractor: LocalGlobalFusionSimple
+
+w_moving: 0.4
+w_static: 0.6
+dice_weight: 0.6
+feat_contrast_weight: 0.2
+
+epochs: 95
+lr: 0.0002
+weight_decay: 0.0001
+scheduler_patience: 5
+scheduler_factor: 0.5
+scheduler_min_lr: 0.000001
+
+val_every: 2
+checkpoint_dir: /project/tracker/checkpoints
+
+mlflow_enabled: true
+mlflow_experiment: segmentacion_vod

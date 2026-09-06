@@ -1,0 +1,92 @@
+version: '3.8'
+
+services:
+  tracker_multimodal_mira:
+    container_name: tracker_multimodal_mira
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      # Host networking for the build's RUN steps (apt-get/conda/pip) — the
+      # default bridge network has no DNS/egress on this host.
+      network: host
+    stop_signal: SIGINT
+    environment:
+      - SERVICE_HOST=core
+      - SERVICE_PORT=50051
+      - DISPLAY=${DISPLAY}
+      - NVIDIA_DRIVER_CAPABILITIES=all
+      - USE_NEW_NVSTREAMMUX=yes
+      - GST_DEBUG=2
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
+      # FiftyOne must bind to 0.0.0.0, not localhost, to be reachable from the
+      # host — inside the container "localhost" is the container itself.
+      - FIFTYONE_DEFAULT_APP_ADDRESS=0.0.0.0
+      - FIFTYONE_DEFAULT_APP_PORT=5151
+      # Keep the embedded MongoDB on the mounted volume so datasets survive
+      # container restarts.
+      - FIFTYONE_DATABASE_DIR=/project/.fiftyone/db
+      #- NVIDIA_VISIBLE_DEVICES=0
+    image: will/tracker_multimodal_mira
+    ports:
+      - "5151:5151"     # FiftyOne (Voxel51) app
+    shm_size: '4gb' #<-- when RUNNING
+    user: "root:root"
+    volumes:
+      - ..:/project
+      - /home/williamramirez/view_of_delft_PUBLIC:/project/view_of_delft_PUBLIC
+      - /etc/passwd:/etc/passwd:ro
+      - /etc/group:/etc/group:ro
+      - ./root:/home/${USER}
+      - /tmp/.X11-unix:/tmp/.X11-unix
+    networks:
+      - tracker_multimodal_mira-services
+    depends_on:
+      - mlflow
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              capabilities: [gpu]
+              device_ids: ['0']
+    entrypoint: bash
+
+  # Background service: experiment tracking UI/API, started automatically
+  # with `docker compose up` (no profile). Runs continuously, independent
+  # of tracker_mra's lifecycle.
+  mlflow:
+    container_name: tracker_mlflow
+    build:
+      context: .
+      dockerfile: mlflow.Dockerfile
+      network: host
+    ports:
+      - "5000:5000"
+    volumes:
+      - ../mlruns:/mlruns
+    restart: unless-stopped
+    networks:
+      - tracker_multimodal_mira-services
+
+  # On-demand microservice: documentation site. Gated behind the "docs"
+  # profile so it does NOT start with a plain `docker compose up`.
+  # Bring it up explicitly with either:
+  #   docker compose --profile docs up mkdocs
+  #   docker compose up mkdocs        (naming it explicitly also works)
+  mkdocs:
+    container_name: tracker_mkdocs
+    image: squidfunk/mkdocs-material:9.5.28
+    command: ["serve", "-a", "0.0.0.0:8000"]
+    working_dir: /docs
+    volumes:
+      - ..:/docs
+    ports:
+      - "8000:8000"
+    profiles:
+      - docs
+    networks:
+      - tracker_multimodal_mira-services
+
+networks:
+  tracker_multimodal_mira-services:
+

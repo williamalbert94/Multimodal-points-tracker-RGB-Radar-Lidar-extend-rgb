@@ -1,0 +1,6 @@
+# Sanity-check figures produced by check_dataloader.py / check_projection.py.
+# One PNG per frame across train+val (~6400 files each, hundreds of MB):
+# regenerate locally instead of committing them.
+check/
+check_projection/
+check_projection_adjusted/

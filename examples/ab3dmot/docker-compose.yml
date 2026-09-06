@@ -1,0 +1,33 @@
+# Dedicated image/service for the AB3DMOT-on-VoD evaluation.
+# Named tracker_multimodal_mira so it never clobbers the main `will/tracker_mra`
+# image built by docker/docker-compose.yml.
+services:
+  ab3dmot_eval:
+    container_name: tracker_multimodal_mira
+    image: will/tracker_multimodal_mira
+    build:
+      context: .
+      dockerfile: Dockerfile
+    working_dir: /work/examples/ab3dmot
+    environment:
+      # AB3DMOT's tracker imports xinshuo_* helpers; this repo vendors them
+      # under external/, so expose both trees on the path.
+      # _shims first: stubs the one unused xinshuo_visualization helper that
+      # AB3DMOT imports unconditionally (see _shims/ and the README).
+      - PYTHONPATH=/work/examples/ab3dmot/_shims:/work:/work/external:/ab3dmot
+      - AB3DMOT_SRC=/ab3dmot
+      - VOD_ROOT=/project/view_of_delft_PUBLIC
+    volumes:
+      # this repository (evaluators, split lists, vendored xinshuo_* modules)
+      - ../..:/work
+      # the AB3DMOT clone (tracker source)
+      - /home/williamramirez/multimodal_reid/AB3DMOT:/ab3dmot:ro
+      # View-of-Delft dataset. Defaults to the path used on the dev box; override
+      # elsewhere with:  VOD_HOST=/your/path docker compose run --rm ab3dmot_eval
+      - ${VOD_HOST:-/local/william/tesis/datasets/multimodal/view_of_delft_PUBLIC}:/project/view_of_delft_PUBLIC:ro
+    # No entrypoint override: `docker compose run --rm ab3dmot_eval <cmd>` then
+    # runs <cmd> directly (an `entrypoint: bash` would turn `python foo.py` into
+    # `bash python foo.py`). Use `... ab3dmot_eval bash` for an interactive shell.
+    command: python run_ab3dmot.py
+    stdin_open: true
+    tty: true
